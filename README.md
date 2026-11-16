@@ -34,9 +34,31 @@ browser --> API Gateway --> Lambda: embed query --> top-k chunks -+
 
 Pending. The eval compares chunking and embedding setups on recall@5 and grounded-answer rate. The results table goes here.
 
+## Repository layout
+
+```
+backend/   Python package, tests, eval data (ingest and chunking exist; eval and API pending)
+web/       Vite + React + TypeScript chat UI (placeholder page)
+infra/     AWS CDK app (empty stack; Lambda and API Gateway pending)
+```
+
 ## Run it
 
-Pending. Commands land with each milestone.
+Available now:
+
+```bash
+cd backend
+uv venv --python 3.12 && uv pip install -e ".[local,dev]"
+.venv/bin/python -m docent download   # fetches the two PDFs into backend/data/raw
+.venv/bin/python -m pytest
+```
+
+```bash
+cd web && npm install && npm run build
+cd infra && npm install && npx cdk synth
+```
+
+The eval, API, and UI commands land with their milestones.
 
 ## Keys
 
