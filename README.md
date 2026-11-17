@@ -32,7 +32,9 @@ browser --> API Gateway --> Lambda: embed query --> top-k chunks -+
 
 ## Eval results
 
-Pending. The eval compares chunking and embedding setups on recall@5 and grounded-answer rate. The results table goes here.
+<!-- eval:start -->
+Pending. Run `python -m docent eval-retrieval`, then `python -m docent report`.
+<!-- eval:end -->
 
 ## Repository layout
 

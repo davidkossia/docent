@@ -12,9 +12,15 @@ def main() -> int:
     p = argparse.ArgumentParser(prog="docent")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("download", help="download the corpus PDFs")
-    r = sub.add_parser("eval-retrieval", help="recall@5 across chunking x embedding setups")
+    v = sub.add_parser("eval-validate", help="check the question file against the eval spec (exit 1 on errors)")
+    v.add_argument("--questions", default=None, help="question file (default: eval/questions.jsonl)")
+    v.add_argument("--no-counts", action="store_true", help="skip the 144-question count rules")
+    r = sub.add_parser("eval-retrieval", help="evidence recall and MRR across chunking x embedding setups")
     r.add_argument("--strategies", nargs="+", default=list(STRATEGIES), choices=list(STRATEGIES))
     r.add_argument("--embedders", nargs="+", default=["local-bge-small"], choices=NAMES)
+    r.add_argument("--questions", default=None, help="question file (default: eval/questions.jsonl)")
+    r.add_argument("--out", default=None, help="results file (default: eval/results/retrieval.json)")
+    sub.add_parser("report", help="rewrite the eval block in README.md from the results files")
     a = sub.add_parser("eval-answers", help="grounded-answer rate and refusals (calls Claude, costs money)")
     a.add_argument("--strategies", nargs="+", default=["section-800"], choices=list(STRATEGIES))
     a.add_argument("--embedders", nargs="+", default=["local-bge-small"], choices=NAMES)
@@ -22,10 +28,22 @@ def main() -> int:
     args = p.parse_args()
     if args.cmd == "download":
         download()
-    elif args.cmd == "eval-retrieval":
-        from .evalrun import run_retrieval
+    elif args.cmd == "eval-validate":
+        from .evalrun import QUESTIONS_PATH, validate_questions
 
-        run_retrieval(args.strategies, args.embedders)
+        errors = validate_questions(args.questions or QUESTIONS_PATH, check_counts=not args.no_counts)
+        for e in errors:
+            print(e)
+        print(f"{len(errors)} error(s)")
+        return 1 if errors else 0
+    elif args.cmd == "eval-retrieval":
+        from .evalrun import QUESTIONS_PATH, run_retrieval
+
+        run_retrieval(args.strategies, args.embedders, args.questions or QUESTIONS_PATH, args.out)
+    elif args.cmd == "report":
+        from .evalrun import write_report
+
+        write_report()
     elif args.cmd == "eval-answers":
         from .evalrun import run_answers
 
