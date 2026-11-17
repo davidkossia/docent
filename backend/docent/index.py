@@ -4,6 +4,7 @@ Used for eval and for running the demo without Pinecone. `pinecone_store.py` ser
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,16 +41,34 @@ class LocalIndex:
             log(f"  embedded {min(i + batch, len(docs))}/{len(docs)}")
         return cls(docs, cls._normalize(np.array(vecs)), embedder)
 
+    @staticmethod
+    def fingerprint(docs, embedder_name: str) -> str:
+        """SHA-256 of the embedder name and every chunk text, in order."""
+        h = hashlib.sha256()
+        h.update(embedder_name.encode())
+        for d in docs:
+            h.update(b"\0")
+            h.update(d.page_content.encode())
+        return h.hexdigest()
+
     @classmethod
     def build_cached(cls, key: str, docs, embedder: Embeddings, log=print) -> "LocalIndex":
         path = INDEX_DIR / key
-        if (path / "vectors.npy").exists():
-            index = cls.load(path)
-            index.embedder = embedder
-            if len(index.docs) == len(docs):
+        name = getattr(embedder, "name", type(embedder).__name__)
+        digest = cls.fingerprint(docs, name)
+        meta = path / "meta.json"
+        if meta.exists() and (path / "vectors.npy").exists():
+            try:
+                stored = json.loads(meta.read_text()).get("sha256")
+            except (OSError, ValueError):
+                stored = None
+            if stored == digest:
+                index = cls.load(path)
+                index.embedder = embedder
                 return index
         index = cls.build(docs, embedder, log=log)
         index.save(path)
+        meta.write_text(json.dumps({"sha256": digest, "embedder": name, "chunks": len(docs)}) + "\n")
         return index
 
     def save(self, path: Path) -> None:
