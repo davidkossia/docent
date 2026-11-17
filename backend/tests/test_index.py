@@ -51,7 +51,7 @@ def test_save_and_load_roundtrip(tmp_path):
 def test_build_cached_reuses_then_rebuilds_on_changed_text(tmp_path, monkeypatch):
     monkeypatch.setattr(index_mod, "INDEX_DIR", tmp_path)
     emb = FakeEmbedder()
-    log = lambda *_: None  # noqa: E731
+    log = lambda *_: None
     LocalIndex.build_cached("k", _docs("aaaa", "bbbb"), emb, log=log)
     assert emb.doc_calls == 1
     meta = json.loads((tmp_path / "k" / "meta.json").read_text())
@@ -67,7 +67,7 @@ def test_build_cached_rebuilds_on_other_embedder_name(tmp_path, monkeypatch):
     monkeypatch.setattr(index_mod, "INDEX_DIR", tmp_path)
     a, b = FakeEmbedder(), FakeEmbedder()
     b.name = "other"
-    log = lambda *_: None  # noqa: E731
+    log = lambda *_: None
     LocalIndex.build_cached("k", _docs("aaaa"), a, log=log)
     LocalIndex.build_cached("k", _docs("aaaa"), b, log=log)
     assert b.doc_calls == 1

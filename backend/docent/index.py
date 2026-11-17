@@ -34,7 +34,7 @@ class LocalIndex:
         return m / np.maximum(np.linalg.norm(m, axis=-1, keepdims=True), 1e-9)
 
     @classmethod
-    def build(cls, docs, embedder: Embeddings, batch: int = 512, log=print) -> "LocalIndex":
+    def build(cls, docs, embedder: Embeddings, batch: int = 512, log=print) -> LocalIndex:
         vecs = []
         for i in range(0, len(docs), batch):
             vecs.extend(embedder.embed_documents([d.page_content for d in docs[i : i + batch]]))
@@ -52,7 +52,7 @@ class LocalIndex:
         return h.hexdigest()
 
     @classmethod
-    def build_cached(cls, key: str, docs, embedder: Embeddings, log=print) -> "LocalIndex":
+    def build_cached(cls, key: str, docs, embedder: Embeddings, log=print) -> LocalIndex:
         path = INDEX_DIR / key
         name = getattr(embedder, "name", type(embedder).__name__)
         digest = cls.fingerprint(docs, name)
@@ -75,11 +75,10 @@ class LocalIndex:
         path.mkdir(parents=True, exist_ok=True)
         np.save(path / "vectors.npy", self.matrix)
         with open(path / "docs.jsonl", "w") as f:
-            for d in self.docs:
-                f.write(json.dumps({"text": d.page_content, "meta": d.metadata}) + "\n")
+            f.writelines(json.dumps({"text": d.page_content, "meta": d.metadata}) + "\n" for d in self.docs)
 
     @classmethod
-    def load(cls, path: Path, embedder: Embeddings | None = None) -> "LocalIndex":
+    def load(cls, path: Path, embedder: Embeddings | None = None) -> LocalIndex:
         matrix = np.load(path / "vectors.npy")
         docs = []
         with open(path / "docs.jsonl") as f:
