@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from langchain_core.embeddings import Embeddings
 
-from .config import env
+from .config import DATA_DIR, env
 
 LOCAL_MODELS = {
     "local-bge-small": "BAAI/bge-small-en-v1.5",
@@ -24,10 +24,15 @@ class LocalEmbeddings(Embeddings):
         from fastembed import TextEmbedding
 
         self.name = name
-        self._model = TextEmbedding(LOCAL_MODELS[name])
+        self._model = TextEmbedding(LOCAL_MODELS[name], cache_dir=str(DATA_DIR / "models"))
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [v.tolist() for v in self._model.embed(texts, batch_size=64)]
+        out: list[list[float]] = []
+        for v in self._model.embed(texts, batch_size=64):
+            out.append(v.tolist())
+            if len(out) % 256 == 0 or len(out) == len(texts):
+                print(f"    {self.name}: {len(out)}/{len(texts)}", flush=True)
+        return out
 
     def embed_query(self, text: str) -> list[float]:
         return next(iter(self._model.query_embed(text))).tolist()
