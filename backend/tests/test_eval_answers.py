@@ -6,13 +6,16 @@ from langchain_core.documents import Document
 
 from docent import evalrun
 from docent.evalrun import (
+    WORST_CASE_CALL_USD,
     Question,
     answer_metrics,
     answers_table,
+    attempt_cost,
     estimate_usd,
     evaluate_question,
     judge_answer,
     parse_setup,
+    response_cost,
     run_answers,
 )
 from docent.index import Hit
@@ -38,8 +41,9 @@ class Retriever:
 class FakeClient:
     """Answers by question id: ids in `refuse` get the no-answer text, ids in `cite_wrong` cite passage 2."""
 
-    def __init__(self, refuse=(), cite_wrong=(), judge=True, tokens=(1000, 500), fail=()):
+    def __init__(self, refuse=(), cite_wrong=(), judge=True, tokens=(1000, 500), fail=(), truncate=(), judge_raises=False):
         self.refuse, self.cite_wrong, self.judge, self.tokens, self.fail = set(refuse), set(cite_wrong), judge, tokens, set(fail)
+        self.truncate, self.judge_raises = set(truncate), judge_raises
         self.calls = []
         outer = self
 
@@ -49,18 +53,22 @@ class FakeClient:
                 outer.calls.append(kw)
                 usage = NS(input_tokens=outer.tokens[0], output_tokens=outer.tokens[1])
                 if "format" in kw["output_config"]:  # the judge call
-                    return NS(stop_reason="end_turn", model="m", usage=usage,
+                    if outer.judge_raises:
+                        raise RuntimeError("judge down")
+                    return NS(stop_reason="end_turn", model="claude-opus-5-5", usage=usage,
                               content=[NS(type="text", text=json.dumps({"correct": outer.judge}))])
                 qid = kw["messages"][0]["content"][-1]["text"].split()[1].rstrip("?")
                 if qid in outer.fail:
                     raise RuntimeError("boom")
+                if qid in outer.truncate:
+                    return NS(stop_reason="max_tokens", model="claude-opus-5-5", usage=usage, content=[])
                 if qid in outer.refuse:
                     blocks = [NS(type="text", text="The documentation does not answer this question.", citations=None)]
                 else:
                     idx = 1 if qid in outer.cite_wrong else 0
                     blocks = [NS(type="text", text="Lists are mutable.",
                                  citations=[NS(document_index=idx, cited_text="x")])]
-                return NS(stop_reason="end_turn", model="m", usage=usage, content=blocks)
+                return NS(stop_reason="end_turn", model="claude-opus-5-5", usage=usage, content=blocks)
 
         self.beta = NS(messages=Messages)
 
@@ -113,7 +121,7 @@ def test_metrics_with_no_rows_are_none():
 
 def test_judge_sees_only_question_reference_and_answer():
     c = FakeClient(judge=False)
-    assert judge_answer(c, "Why?", "Because.", "No idea.") is False
+    assert judge_answer(c, "Why?", "Because.", "No idea.") == (False, "claude-opus-5-5")
     call = c.calls[0]
     assert call["output_config"]["effort"] == "low" and call["output_config"]["format"]["type"] == "json_schema"
     prompt = call["messages"][0]["content"]
@@ -123,7 +131,7 @@ def test_judge_sees_only_question_reference_and_answer():
 
 def test_judge_refusal_is_none():
     c = NS(beta=NS(messages=NS(create=lambda **kw: NS(stop_reason="refusal", content=[], usage=NS(input_tokens=1, output_tokens=1)))))
-    assert judge_answer(c, "q", "r", "a") is None
+    assert judge_answer(c, "q", "r", "a")[0] is None
 
 
 def test_parse_setup():
@@ -172,11 +180,6 @@ def test_dry_run_prints_counts_and_estimate_and_makes_no_calls(tmp_path, capsys)
     assert c.calls == [] and not (tmp_path / "answers.json").exists()
 
 
-def test_estimate_for_three_setups_of_the_real_test_split():
-    # 72 test questions x 3 setups = 216 answer calls; 60 answerable x 3 = 180 judge calls
-    assert 5 <= estimate_usd(216, 180) <= 10
-
-
 def test_budget_stop_writes_partial_results(tmp_path):
     c = FakeClient(tokens=(1_000_000, 0))  # $4 per call
     data = _run(tmp_path, c, max_usd=5.0)
@@ -220,3 +223,90 @@ def test_report_adds_the_answer_table(tmp_path):
     text = evalrun.render_block(res)
     assert "| Setup | Answerable / unanswerable | Grounded |" in text and SETUP in text
     assert "Total cost: $" in answers_table(data)
+
+
+# ---------- spend controls ----------
+
+def _calls(c, judge):
+    return [k for k in c.calls if ("format" in k["output_config"]) == judge]
+
+
+def test_budget_counts_earlier_runs(tmp_path):
+    c1 = FakeClient(tokens=(1_000_000, 0))  # $4 per call
+    first = _run(tmp_path, c1, max_usd=5.0)  # q1 answer + judge = $8
+    assert first["cost_usd"] == pytest.approx(8.0)
+    c2 = FakeClient()
+    second = _run(tmp_path, c2, max_usd=5.0)  # the file already holds $8, so no call may run
+    assert c2.calls == []
+    assert second["stopped"] == "budget" and second["cost_usd"] == pytest.approx(8.0)
+    assert [r["id"] for r in second["setups"][SETUP]["rows"]] == ["q1"]
+
+
+def test_budget_is_checked_before_the_judge_call(tmp_path):
+    c = FakeClient(tokens=(1_000_000, 0))
+    data = _run(tmp_path, c, max_usd=3.0)  # the answer call alone ($4) passes the budget
+    assert len(c.calls) == 1 and not _calls(c, judge=True)
+    row = data["setups"][SETUP]["rows"][0]
+    assert row["status"] == "answered" and row["correct"] is None and "budget" in row["judge_error"]
+    # A rerun judges that row without asking the question again.
+    c2 = FakeClient()
+    data = _run(tmp_path, c2, max_usd=1000)
+    assert len(_calls(c2, judge=True)) == 2  # q1 retry and q2
+    assert [k["messages"][0]["content"][-1]["text"] for k in _calls(c2, judge=False)] == ["Question q2?", "Question q3?"]
+    assert data["setups"][SETUP]["rows"][0]["correct"] is True and data["setups"][SETUP]["rows"][0]["judge_error"] is None
+
+
+def test_judge_failure_keeps_the_paid_answer(tmp_path):
+    c = FakeClient(judge_raises=True)
+    data = _run(tmp_path, c)
+    rows = data["setups"][SETUP]["rows"]
+    assert [r["id"] for r in rows] == ["q1", "q2", "q3"]
+    assert rows[0]["status"] == "answered" and rows[0]["correct"] is None and "judge down" in rows[0]["judge_error"]
+    assert rows[0]["cost_usd"] > 0
+    assert data["setups"][SETUP]["metrics"]["judge_errors"] == 2
+    c2 = FakeClient()
+    _run(tmp_path, c2)
+    assert not _calls(c2, judge=False)  # no answer was paid for twice
+    assert len(_calls(c2, judge=True)) == 2
+
+
+def test_dropped_error_rows_keep_their_cost(tmp_path):
+    c = FakeClient(truncate=["q2"], tokens=(100_000, 10_000))  # q2 is paid for, then fails with max_tokens
+    first = _run(tmp_path, c)
+    q2 = next(r for r in first["setups"][SETUP]["rows"] if r["id"] == "q2")
+    assert q2["status"] == "error" and q2["cost_usd"] > 0
+    second = _run(tmp_path, FakeClient(tokens=(100_000, 10_000)))
+    assert [r["status"] for r in second["setups"][SETUP]["rows"]] == ["answered", "answered", "answered"]
+    assert second["dropped_cost_usd"] == pytest.approx(q2["cost_usd"])
+    assert second["cost_usd"] >= first["cost_usd"] + 0  # cost never decreases
+    assert second["cost_usd"] == pytest.approx(sum(r["cost_usd"] for r in second["setups"][SETUP]["rows"]) + q2["cost_usd"])
+
+
+def test_cost_sums_fallback_attempts_at_their_own_model_rates():
+    resp = NS(model="claude-opus-4-8", usage=NS(
+        input_tokens=1000, output_tokens=1000,  # top level covers only the attempt that produced the message
+        iterations=[
+            {"type": "message", "model": "claude-opus-5-5", "input_tokens": 1_000_000, "output_tokens": 0},
+            {"type": "fallback_message", "model": "claude-opus-4-8", "input_tokens": 0, "output_tokens": 1_000_000},
+        ]))
+    assert response_cost(resp) == pytest.approx(4.0 + 25.0)
+
+
+def test_cost_without_iterations_uses_the_response_model_and_cache_rates():
+    usage = NS(input_tokens=1_000_000, output_tokens=1_000_000, cache_read_input_tokens=1_000_000,
+               cache_creation_input_tokens=1_000_000)
+    assert response_cost(NS(model="claude-opus-5-5", usage=usage)) == pytest.approx(4 + 20 + 0.20 + 5.0)
+    assert response_cost(NS(model="claude-opus-5", usage=usage)) == pytest.approx(5 + 25 + 0.50 + 6.25)
+    assert response_cost(NS(model="unknown-model", usage=usage)) == pytest.approx(5 + 25 + 0.50 + 6.25)
+    assert attempt_cost(NS(input_tokens=None, output_tokens=0), "claude-opus-5-5") == 0
+
+
+def test_judge_model_is_saved_and_worst_case_is_printed(tmp_path, capsys):
+    data = _run(tmp_path, FakeClient())
+    assert data["setups"][SETUP]["rows"][0]["judge_model"] == "claude-opus-5-5"
+    assert "up to $0.43" in capsys.readouterr().out
+    assert WORST_CASE_CALL_USD == pytest.approx(0.43)
+
+
+def test_dry_run_estimate_for_three_setups_stays_in_range():
+    assert 5 <= estimate_usd(216, 180) <= 10

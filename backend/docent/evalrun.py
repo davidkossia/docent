@@ -392,11 +392,19 @@ def write_report(readme=README_PATH, results_dir=RESULTS_DIR) -> None:
 
 # ---------- answer eval (calls Claude; costs money) ----------
 
-PRICE_IN_PER_TOKEN = 4 / 1_000_000  # claude-opus-5-5, USD
-PRICE_OUT_PER_TOKEN = 20 / 1_000_000
+# USD per 1M tokens: (input, output, cache read, cache write 5 min). Source: claude-api skill model table.
+PRICES = {
+    "claude-opus-5-5": (4.0, 20.0, 0.20, 5.0),
+    "claude-opus-5": (5.0, 25.0, 0.50, 6.25),
+    "claude-opus-4-8": (5.0, 25.0, 0.50, 6.25),
+}
+UNKNOWN_MODEL_PRICES = PRICES["claude-opus-5"]  # the dearest known model, so an unknown one is not under-counted
+ANSWER_MAX_TOKENS = 16000  # answer.py
+# Worst case for one answer call: max_tokens of output plus 6,000 input tokens, both at the dearest fallback rates.
+WORST_CASE_CALL_USD = (ANSWER_MAX_TOKENS * UNKNOWN_MODEL_PRICES[1] + 6000 * UNKNOWN_MODEL_PRICES[0]) / 1e6
 # Estimates for the dry run: 5 passages in, a short cited answer out, thinking tokens included.
 EST_ANSWER_CALL_USD = 0.03
-EST_JUDGE_CALL_USD = 0.004
+EST_JUDGE_CALL_USD = 0.008
 ANSWERS_PATH = RESULTS_DIR / "answers.json"
 
 JUDGE_SYSTEM = (
@@ -412,31 +420,52 @@ JUDGE_SCHEMA = {
 }
 
 
+def _get(obj, name, default=0):
+    value = obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
+    return value or default
+
+
+def attempt_cost(entry, model: str) -> float:
+    """USD for one attempt: `entry` holds input_tokens, output_tokens and the two cache token counts."""
+    pin, pout, pread, pwrite = PRICES.get(model, UNKNOWN_MODEL_PRICES)
+    return (
+        _get(entry, "input_tokens") * pin
+        + _get(entry, "output_tokens") * pout
+        + _get(entry, "cache_read_input_tokens") * pread
+        + _get(entry, "cache_creation_input_tokens") * pwrite
+    ) / 1e6
+
+
+def response_cost(resp) -> float:
+    """USD for a response. With `usage.iterations` (server-side fallbacks), sum each attempt at its own model's rates."""
+    usage = getattr(resp, "usage", None)
+    if usage is None:
+        return 0.0
+    default_model = getattr(resp, "model", None) or CLAUDE_MODEL
+    iterations = _get(usage, "iterations", None)
+    if iterations:
+        return sum(attempt_cost(_get(it, "usage", it), _get(it, "model", None) or default_model) for it in iterations)
+    return attempt_cost(usage, default_model)
+
+
 class _MeteredMessages:
     def __init__(self, meter, real):
         self._meter, self._real = meter, real
 
     def create(self, **kw):
         resp = self._real.create(**kw)
-        usage = getattr(resp, "usage", None)
-        self._meter.input_tokens += getattr(usage, "input_tokens", 0) or 0
-        self._meter.output_tokens += getattr(usage, "output_tokens", 0) or 0
+        self._meter.cost_usd += response_cost(resp)
         return resp
 
 
 class MeteredClient:
-    """Wraps a client and adds up token usage from every `beta.messages.create` call."""
+    """Wraps a client and adds up the cost of every `beta.messages.create` call."""
 
     def __init__(self, client):
-        self.input_tokens = 0
-        self.output_tokens = 0
+        self.cost_usd = 0.0
         beta = type("Beta", (), {})()
         beta.messages = _MeteredMessages(self, client.beta.messages)
         self.beta = beta
-
-    @property
-    def cost_usd(self) -> float:
-        return self.input_tokens * PRICE_IN_PER_TOKEN + self.output_tokens * PRICE_OUT_PER_TOKEN
 
 
 def parse_setup(name: str) -> tuple[str, str]:
@@ -453,8 +482,11 @@ def estimate_usd(n_answer_calls: int, n_judge_calls: int) -> float:
     return n_answer_calls * EST_ANSWER_CALL_USD + n_judge_calls * EST_JUDGE_CALL_USD
 
 
-def judge_answer(client, question: str, reference: str, answer: str) -> bool | None:
-    """Ask the judge whether `answer` matches `reference`. None when the judge refuses or replies off-schema."""
+def judge_answer(client, question: str, reference: str, answer: str) -> tuple[bool | None, str | None]:
+    """Ask the judge whether `answer` matches `reference`.
+
+    Returns (verdict, serving model). The verdict is None when the judge refuses or replies off-schema.
+    """
     prompt = f"Question: {question}\n\nReference answer: {reference}\n\nAnswer to grade: {answer}"
     resp = client.beta.messages.create(
         model=CLAUDE_MODEL,
@@ -465,14 +497,15 @@ def judge_answer(client, question: str, reference: str, answer: str) -> bool | N
         output_config={"effort": "low", "format": {"type": "json_schema", "schema": JUDGE_SCHEMA}},
         messages=[{"role": "user", "content": prompt}],
     )
+    model = getattr(resp, "model", None)
     if resp.stop_reason == "refusal":
-        return None
+        return None, model
     text = "".join(b.text for b in resp.content if b.type == "text")
     try:
         value = json.loads(text)["correct"]
     except (ValueError, KeyError, TypeError):
-        return None
-    return value if isinstance(value, bool) else None
+        return None, model
+    return (value if isinstance(value, bool) else None), model
 
 
 def evaluate_question(q: Question, body: dict) -> dict:
@@ -490,7 +523,8 @@ def evaluate_question(q: Question, body: dict) -> dict:
     text = "".join(seg["text"] for seg in body["segments"]).strip()
     return {
         "id": q.id, "type": q.type, "answerable": answerable, "status": status, "grounded": grounded,
-        "correct": None, "answer": text, "error": None, "cost_usd": 0.0,
+        "correct": None, "judge_model": None, "judge_error": None, "answer": text, "error": None,
+        "cost_usd": 0.0,
     }
 
 
@@ -506,6 +540,7 @@ def answer_metrics(rows: list[dict]) -> dict:
         "n_answerable": len(ans),
         "n_unanswerable": len(unans),
         "errors": sum(1 for r in rows if r["status"] == "error"),
+        "judge_errors": sum(1 for r in rows if r.get("judge_error")),
         "grounded_rate": rate(sum(r["status"] == "answered" and r["grounded"] for r in ans), len(ans)),
         "judged_correct_rate": rate(sum(r["correct"] is True for r in ans), len(ans)),
         "refusal_accuracy": rate(sum(r["status"] == "no_answer" for r in unans), len(unans)),
@@ -516,14 +551,22 @@ def answer_metrics(rows: list[dict]) -> dict:
 
 def _load_answers(path: Path) -> dict:
     if path.exists():
-        return json.loads(path.read_text())
-    return {"model": CLAUDE_MODEL, "setups": {}, "cost_usd": 0.0, "stopped": None}
+        data = json.loads(path.read_text())
+        data.setdefault("dropped_cost_usd", 0.0)
+        return data
+    return {"model": CLAUDE_MODEL, "setups": {}, "cost_usd": 0.0, "dropped_cost_usd": 0.0, "stopped": None}
+
+
+def _total_cost(data: dict) -> float:
+    """Every dollar this file has spent: kept rows plus the cost of error rows dropped for a rerun."""
+    return round(sum(answer_metrics(e["rows"])["cost_usd"] for e in data["setups"].values())
+                 + data["dropped_cost_usd"], 4)
 
 
 def _save_answers(path: Path, data: dict) -> None:
     for entry in data["setups"].values():
         entry["metrics"] = answer_metrics(entry["rows"])
-    data["cost_usd"] = round(sum(e["metrics"]["cost_usd"] for e in data["setups"].values()), 4)
+    data["cost_usd"] = _total_cost(data)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2) + "\n")
@@ -540,12 +583,18 @@ def _local_retriever(setup: str):
     return LocalRetriever(index)
 
 
+def _needs_judge(row: dict) -> bool:
+    return row["answerable"] and row["status"] == "answered" and row["correct"] is None and bool(row.get("judge_error"))
+
+
 def run_answers(setups: list[str], max_usd: float, yes: bool, questions_path=QUESTIONS_PATH, out_path=None,
                 client=None, retriever_factory=None, k: int = 5) -> dict | None:
     """Answer every test question for each setup, then score. Without `yes`, print the estimate and stop.
 
-    Writes the results file after each question. A rerun skips questions that already have a row
-    (rows with status `error` run again). `max_usd` caps the spend of this run, not of earlier runs.
+    Writes the results file after each question. A rerun skips questions that already have a row, runs only
+    the judge for rows whose judge call failed, and runs rows with status `error` again. `max_usd` caps the
+    spend recorded in the results file, so earlier runs count against it. The check runs before every call,
+    so the total can pass `max_usd` by at most one call (see `WORST_CASE_CALL_USD`).
     """
     from .service import ServiceError, ask
 
@@ -555,20 +604,24 @@ def run_answers(setups: list[str], max_usd: float, yes: bool, questions_path=QUE
     out = Path(out_path) if out_path else ANSWERS_PATH
     data = _load_answers(out)
 
-    def done_ids(setup):
-        rows = data["setups"].get(setup, {}).get("rows", [])
-        return {r["id"] for r in rows if r["status"] != "error"}
+    def rows_of(setup):
+        return data["setups"].get(setup, {}).get("rows", [])
 
-    todo = {s: [q for q in questions if q.id not in done_ids(s)] for s in setups}
+    todo = {s: [q for q in questions if q.id not in {r["id"] for r in rows_of(s) if r["status"] != "error"}]
+            for s in setups}
     n_answer = sum(len(v) for v in todo.values())
     n_judge = sum(1 for v in todo.values() for q in v if q.type not in UNANSWERABLE)
+    n_judge += sum(1 for s in setups for r in rows_of(s) if _needs_judge(r))
+    prior = _total_cost(data)
     est = estimate_usd(n_answer, n_judge)
     print(f"{len(questions) * len(setups)} answer calls ({len(questions)} test questions x {len(setups)} setups)")
     if n_answer < len(questions) * len(setups):
         print(f"{n_answer} still to run; the rest are in {out}")
-    print(f"{n_judge} judge calls at most; estimated cost ${est:.2f} at {CLAUDE_MODEL} (budget ${max_usd:.2f})")
-    if est > max_usd:
-        print("The estimate is over the budget; the run stops cleanly when it reaches the budget.")
+    print(f"{n_judge} judge calls at most; estimated cost ${est:.2f} at {CLAUDE_MODEL}")
+    print(f"Budget ${max_usd:.2f} covers the ${prior:.2f} already spent in {out}. The check runs before each call, "
+          f"so the total can pass it by up to ${WORST_CASE_CALL_USD:.2f} (one answer call at max_tokens {ANSWER_MAX_TOKENS}).")
+    if prior + est > max_usd:
+        print("The estimate is over the remaining budget; the run stops cleanly when it reaches the budget.")
     if not yes:
         print("Dry run. Pass --yes to spend it.")
         return None
@@ -578,40 +631,87 @@ def run_answers(setups: list[str], max_usd: float, yes: bool, questions_path=QUE
 
         client = anthropic.Anthropic()
     meter = MeteredClient(client)
+
+    def spent() -> float:
+        return prior + meter.cost_usd
+
+    def over_budget() -> bool:
+        if spent() >= max_usd:
+            data["stopped"] = "budget"
+            print(f"Stopped: total spend ${spent():.2f} reached the ${max_usd:.2f} budget. Rerun with a higher "
+                  "--max-usd to resume.")
+            return True
+        return False
+
+    for entry in data["setups"].values():  # error rows rerun; their cost stays in the file total
+        keep = [r for r in entry["rows"] if r["status"] != "error"]
+        data["dropped_cost_usd"] = round(data["dropped_cost_usd"] + sum(
+            r["cost_usd"] for r in entry["rows"] if r["status"] == "error"), 6)
+        entry["rows"] = keep
     data["stopped"] = None
+    _save_answers(out, data)
+
+    def judge(row, q_text, reference):
+        verdict, model = judge_answer(meter, q_text, reference, row["answer"])
+        row["correct"], row["judge_model"] = verdict, model
+        row["judge_error"] = None if verdict is not None else "no verdict (refusal or unparseable reply)"
+
     stop = False
     for setup in setups:
         if stop:
             break
         entry = data["setups"].setdefault(setup, {"rows": []})
-        entry["rows"] = [r for r in entry["rows"] if r["status"] != "error"]
-        if not todo[setup]:
+        ref = {q.id: q for q in questions}
+        pending = [r for r in entry["rows"] if _needs_judge(r)]
+        if not todo[setup] and not pending:
             continue
         print(f"== {setup}", flush=True)
-        retriever = (retriever_factory or _local_retriever)(setup)
+        for row in pending:
+            if over_budget():
+                stop = True
+                break
+            before = meter.cost_usd
+            try:
+                judge(row, ref[row["id"]].question, ref[row["id"]].answer)
+            except Exception as exc:  # noqa: BLE001 - the row records the failure
+                row["judge_error"] = f"{type(exc).__name__}: {exc}"
+            row["cost_usd"] = round(row["cost_usd"] + meter.cost_usd - before, 6)
+            _save_answers(out, data)
+            print(f"   {row['id']} judge retry correct={row['correct']} spent ${spent():.3f}", flush=True)
+        if stop:
+            break
+        retriever = None
         for q in todo[setup]:
+            if over_budget():
+                stop = True
+                break
+            retriever = retriever or (retriever_factory or _local_retriever)(setup)
             before = meter.cost_usd
             try:
                 body = ask(q.question, retriever, meter, k=k)
                 row = evaluate_question(q, body)
-                if row["answerable"] and row["status"] == "answered":
-                    row["correct"] = judge_answer(meter, q.question, q.answer, row["answer"])
             except ServiceError as exc:
                 row = evaluate_question(q, {"status": "error", "segments": [], "passages": []})
                 row["error"] = f"{exc.code}: {exc.message}"
             except Exception as exc:  # noqa: BLE001 - keep the run going; the row records the failure
                 row = evaluate_question(q, {"status": "error", "segments": [], "passages": []})
                 row["error"] = f"{type(exc).__name__}: {exc}"
+            if row["answerable"] and row["status"] == "answered":
+                # The answer is paid for. Keep it whatever happens to the judge call.
+                if over_budget():
+                    row["judge_error"] = "not run: budget reached"
+                    stop = True
+                else:
+                    try:
+                        judge(row, q.question, q.answer)
+                    except Exception as exc:  # noqa: BLE001
+                        row["judge_error"] = f"{type(exc).__name__}: {exc}"
             row["cost_usd"] = round(meter.cost_usd - before, 6)
             entry["rows"].append(row)
             _save_answers(out, data)
             print(f"   {q.id} {row['status']} grounded={row['grounded']} correct={row['correct']} "
-                  f"spent ${meter.cost_usd:.3f}", flush=True)
-            if meter.cost_usd >= max_usd:
-                data["stopped"] = "budget"
-                stop = True
-                print(f"Stopped: spend ${meter.cost_usd:.2f} reached the ${max_usd:.2f} budget. "
-                      "Rerun to resume.")
+                  f"spent ${spent():.3f}", flush=True)
+            if stop:
                 break
     _save_answers(out, data)
     print(f"wrote {out}; total cost ${data['cost_usd']:.2f}")
