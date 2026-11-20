@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ask, type Passage } from "./api";
 import { Composer } from "./components/Composer";
 import { MessageList, type Message } from "./components/MessageList";
@@ -16,7 +16,7 @@ export function App() {
   const busy = messages.some((m) => m.state.kind === "loading");
 
   async function run(id: number, question: string) {
-    const result = await ask(question);
+    const result = await ask(question, AbortSignal.timeout(30_000));
     setMessages((ms) =>
       ms.map((m) =>
         m.id === id
@@ -39,16 +39,20 @@ export function App() {
 
   function onChip(passage: Passage, key: string, el: HTMLButtonElement, message: Message) {
     if (message.state.kind !== "done") return;
+    if (open?.key === key) {
+      close();
+      return;
+    }
     const quotes = message.state.data.segments.flatMap((s) =>
       s.citations.filter((c) => c.passage === passage.n).map((c) => c.cited_text),
     );
     setOpen({ key, passage, quotes, el });
   }
 
-  function close() {
+  const close = useCallback(() => {
     open?.el.focus();
     setOpen(null);
-  }
+  }, [open]);
 
   return (
     <div className="app">

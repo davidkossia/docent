@@ -40,8 +40,9 @@ export function Composer({ disabled, onSend }: Props) {
         onKeyDown={onKeyDown}
       />
       <div className="composer-row">
-        <span className="count" aria-live="polite">
-          {remaining <= 50 ? `${remaining} characters left` : ""}
+        <span className="count">{remaining <= 50 ? `${remaining} characters left` : ""}</span>
+        <span className="sr-only" role="status">
+          {[50, 10, 0].includes(remaining) ? `${remaining} characters left` : ""}
         </span>
         <button type="submit" disabled={!canSend}>
           Send

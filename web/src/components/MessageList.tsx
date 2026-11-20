@@ -13,7 +13,7 @@ const ERROR_TEXT: Record<string, string> = {
   upstream_error: "The answer service failed. Try again.",
   timeout: "The answer took too long. Try again.",
   network: "Could not reach the server. Check that it is running.",
-  bad_response: "The server sent a response I could not read.",
+  bad_response: "The server sent an unreadable response.",
 };
 
 type Props = {
@@ -70,7 +70,6 @@ function Done({
   }
   return (
     <>
-      {data.status === "no_answer" && <p className="muted">The books do not answer this question.</p>}
       <AnswerText
         segments={data.segments}
         passages={data.passages}

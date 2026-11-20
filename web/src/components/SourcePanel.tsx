@@ -11,6 +11,14 @@ export function SourcePanel({ passage, quotes, onClose }: Props) {
     ref.current?.focus();
   }, [passage]);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <aside
       ref={ref}
@@ -18,12 +26,6 @@ export function SourcePanel({ passage, quotes, onClose }: Props) {
       role="dialog"
       aria-label={`Source ${passage.n}`}
       tabIndex={-1}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          onClose();
-        }
-      }}
     >
       <div className="panel-head">
         <div>

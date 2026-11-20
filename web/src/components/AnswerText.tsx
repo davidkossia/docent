@@ -19,7 +19,13 @@ export function AnswerText({ segments, passages, activeChip, chipKey, onChip }: 
             {seg.text}
             {distinct.map((n) => {
               const passage = passages.find((p) => p.n === n);
-              if (!passage) return null;
+              if (!passage) {
+                return (
+                  <span key={n} className="chip chip-missing" role="img" aria-label={`Source ${n}: unavailable`}>
+                    {n}
+                  </span>
+                );
+              }
               const key = chipKey(i, n);
               return (
                 <button
