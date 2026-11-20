@@ -57,8 +57,11 @@ def make_handler(handle):
             if self.path != "/ask":
                 return self._send(404, ServiceError(404, "not_found", "No such route.").body())
             try:
-                length = int(self.headers.get("Content-Length") or 0)
-                if length > MAX_BODY:
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = -1
+                if not 0 <= length <= MAX_BODY:
                     raise ServiceError(400, "invalid_question", "Enter a question of 1 to 500 characters.")
                 try:
                     question = json.loads(self.rfile.read(length) or b"{}").get("question")
@@ -84,13 +87,23 @@ def serve(fake: str | None = None, port: int = PORT) -> None:
         from anthropic import Anthropic
 
         from .config import INDEX_DIR, env
-        from .embeddings import get_embedder
+        from .embeddings import LOCAL_MODELS, get_embedder
         from .index import LocalIndex
         from .service import LocalRetriever, setup_name
 
+        api_key = env("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise SystemExit("ANTHROPIC_API_KEY is not set. Add it to .env, or run with --fake.")
         key = setup_name()
-        index = LocalIndex.load(INDEX_DIR / key, get_embedder(key.split("__", 1)[1]))
-        retriever, client = LocalRetriever(index), Anthropic(api_key=env("ANTHROPIC_API_KEY"), timeout=60)
+        embedder_name = key.split("__", 1)[-1]
+        if embedder_name not in LOCAL_MODELS or not (INDEX_DIR / key / "vectors.npy").exists():
+            raise SystemExit(
+                f"DOCENT_SETUP={key!r} is not a local setup with a built index. "
+                "Use <strategy>__local-bge-small or <strategy>__local-bge-base."
+            )
+        index = LocalIndex.load(INDEX_DIR / key, get_embedder(embedder_name))
+        retriever = LocalRetriever(index)
+        client = Anthropic(api_key=api_key, timeout=60, max_retries=0)
         handle = lambda q: (200, ask(q, retriever, client))  # noqa: E731
     print(f"docent API on http://localhost:{port}/ask" + (" (fake)" if fake else ""))
     ThreadingHTTPServer(("127.0.0.1", port), make_handler(handle)).serve_forever()

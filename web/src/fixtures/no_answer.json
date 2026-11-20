@@ -9,48 +9,48 @@
   "passages": [
     {
       "n": 1,
-      "chunk_id": "section-800:186",
+      "chunk_id": "section-800:2",
       "book_title": "Introduction to Python Programming",
-      "section_title": "4.4 Operator precedence",
-      "page_start": 108,
-      "page_end": 108,
-      "text": "Introduction to Python Programming | 4.4 Operator precedence\n4.4 Operator precedence\nLearning objectives\nBy the end of this section you should be able to\n• Describe how precedence impacts order of operations.\n• Describe how associativity impacts order of operations.\n• Explain the purpose of using parentheses in expressions with multiple operators.\nPrecedence\nWhen an expression has multiple operators, which operator is evaluated first? Precedence rules provide the\npriority level of operators. Operators with the highest precedence execute first. Ex: 1 + 2 * 3 is 7 because\nmultiplication takes precedence over addition. However, (1 + 2) * 3 is 9 because parentheses take\nprecedence over multiplication.\nOperator Meaning\n() Parentheses\n** Exponentiation (right associative)\n*, /, //, % Multiplication, division, floor division, modulo"
+      "section_title": "1.1 Background",
+      "page_start": 18,
+      "page_end": 18,
+      "text": "Introduction to Python Programming | 1.1 Background\n1.1 Background\nLearning Objectives\nBy the end of this section you should be able to\n• Name two examples of computer programs in everyday life.\n• Explain why Python is a good programming language to learn.\nComputer programs\nA computer is an electronic device that stores and processes information. Examples of computers include\nsmartphones, tablets, laptops, desktops, and servers. Technically, a program is a sequence of instructions that\na computer can run. Programs help people accomplish everyday tasks, create new technology, and have fun.\nThe goal of this book is to teach introductory programming and problem solving. Writing programs is a\ncreative activity, inherently useful, and rewarding! No prior background in computer science is necessary to"
     },
     {
       "n": 2,
-      "chunk_id": "section-800:188",
-      "book_title": "Introduction to Python Programming",
-      "section_title": "4.4 Operator precedence",
-      "page_start": 109,
-      "page_end": 109,
-      "text": "Introduction to Python Programming | 4.4 Operator precedence\noperations when precedence is the same. Ex: 8 / 4 * 3 is evaluated as (8/4) * 3 rather than 8 / (4*3)\nbecause multiplication and division are left associative. Most operators are left associative and are evaluated\nfrom left to right. Exponentiation is the main exception (noted above) and is right associative: that is, evaluated\nfrom right to left. Ex: 2 ** 3 ** 4 is evaluated as 2 ** (3**4).\nWhen comparison operators are chained, the expression is converted into the equivalent combination of\ncomparisons and evaluated from left to right. Ex. 10 < x <= 20 is evaluated as 10 < x and x <= 20.\nCHECKPOINT\nOperation precedence\nOperation precedence; ch 4, video 10 (https://www.openstax.org/r/operation-precedence)\nCONCEPTS IN PRACTICE\nAssociativity\nHow is each expression evaluated?"
+      "chunk_id": "section-800:1668",
+      "book_title": "Introduction to Computer Science",
+      "section_title": "6.4 Memory Management",
+      "page_start": 277,
+      "page_end": 277,
+      "text": "Introduction to Computer Science | 6.4 Memory Management\n6.4 Memory Management\nLearning Objectives\nBy the end of this section, you will be able to:\n• Discuss key concepts related to memory\n• Evaluate dynamic storage management solutions\n• Discuss the differences between virtual and physical memory\nAs you have learned, memory plays a huge role in OSs. Here, we discuss the memory multiplexing, linkers and\ndynamic linking, dynamic storage management, virtual memory, and demand paging.\nMemory\nDifferent processes and threads share the same hardware. It is therefore necessary to multiplex the CPU (i.e.,\ntemporal execution), memory (spatial access), and disks and devices. As discussed earlier, the complete\nworking state of processes and/or kernels is defined by its data (i.e., memory, registers, and disk). For the sake"
     },
     {
       "n": 3,
-      "chunk_id": "section-800:187",
+      "chunk_id": "section-800:297",
       "book_title": "Introduction to Python Programming",
-      "section_title": "4.4 Operator precedence",
-      "page_start": 108,
-      "page_end": 109,
-      "text": "Introduction to Python Programming | 4.4 Operator precedence\n** Exponentiation (right associative)\n*, /, //, % Multiplication, division, floor division, modulo\n+, - Addition, subtraction\n<, <=, >, >=, ==, != Comparison operators\nnot Logical not operator\nand Logical and operator\nor Logical or operator\nTable 4.4 Operator precedence from highest to lowest.\nCHECKPOINT\nOperator precedence\nOperator precedence; ch 4, video 9 (https://www.openstax.org/r/operator-precedence)\nCONCEPTS IN PRACTICE\nPrecedence rules\nWhich part of each expression is evaluated first?\n1 . x ** 2 + 6 / 3\na. 6 / 3\nb. x ** 2\nc. 2 + 6\n2 . not 3 * 5 > 10\na. 3 * 5\nb. not 3\nc. 5 > 10\n3 . z == 5 and x / 8 < 100\na. 5 and x\nb. x / 8\nc. 8 < 100\nAssociativity\nWhat if operators beside each other have the same level of precedence? Associativity determines the order of"
+      "section_title": "7.1 Module basics",
+      "page_start": 176,
+      "page_end": 176,
+      "text": "Introduction to Python Programming | 7.1 Module basics\n7.1 Module basics\nLearning objectives\nBy the end of this section you should be able to\n• Write a module that consists only of function definitions.\n• Import the module and use the functions in a program.\nDefining a module\nModules are defined by putting code in a .py file. The area module below is in a file named area.py. This\nmodule provides functions for calculating area.\nEXAMPLE 7.1\nThe area module\n\"\"\"Functions to calculate the area of geometric shapes.\"\"\"\nimport math\n# 2D shapes\ndef square(side):\n    \"\"\"Gets the area of a square.\"\"\"\n    return side**2\ndef rectangle(length, width):\n    \"\"\"Gets the area of a rectangle.\"\"\"\n    return length * width\ndef triangle(base, height):\n    \"\"\"Gets the area of a triangle.\"\"\"\n    return 0.5 * base * height\ndef trapezoid(base1, base2, height):"
     },
     {
       "n": 4,
-      "chunk_id": "section-800:189",
-      "book_title": "Introduction to Python Programming",
-      "section_title": "4.4 Operator precedence",
-      "page_start": 109,
-      "page_end": 110,
-      "text": "Introduction to Python Programming | 4.4 Operator precedence\nCONCEPTS IN PRACTICE\nAssociativity\nHow is each expression evaluated?\n4 . 10 + 3 * 2 / 4\na. 10 + (3 * (2 / 4))\nb. 10 + ((3 * 2) / 4)\nc. (10 + 3) * (2 / 4)\n5 . 2 * 2 ** 2 ** 3\na. 2 * ((2 ** 2) ** 3)\nb. 2 * (2 ** (2 ** 3))\nc. ((2*2) ** 2) ** 3\n6 . 100 < x > 150\na. 100 < x and x < 150\nb. 100 < x or x > 150\nc. 100 < x and x > 150\nEnforcing order and clarity with parentheses\nOperator precedence rules can be hard to remember. Parentheses not only assert a different order of\noperations but also reduce confusion.\nCHECKPOINT\nUsing parentheses\nUsing parenthesis; ch 4, video 11 (https://www.openstax.org/r/using-parentheses)\nCONCEPTS IN PRACTICE\nUsing parentheses\n7 . Consider the example above. Why was the evaluation order different from what the programmer\nwanted?\na. Equality has precedence over and."
+      "chunk_id": "section-800:1507",
+      "book_title": "Introduction to Computer Science",
+      "section_title": "5.6 Processor Architectures",
+      "page_start": 236,
+      "page_end": 236,
+      "text": "Introduction to Computer Science | 5.6 Processor Architectures\n5.6 Processor Architectures\nLearning Objectives\nBy the end of this section, you will be able to:\n• Discuss the history and advancements in traditional processor architectures and computation\nmodels\n• Define heterogeneity and discuss its effect on computer systems\nProcessors have a relatively short history that starts in the late 1960s; however, there have been big jumps\nsince then. In this section, we learn about the evolution of processors from the dawn of processor design until\ntoday. The main measures of success of processors involve correctness, speed, power, reliability, and security.\nSpeed has been the main measure of success for some time. But then computer designers began to worry"
     },
     {
       "n": 5,
-      "chunk_id": "section-800:191",
+      "chunk_id": "section-800:522",
       "book_title": "Introduction to Python Programming",
-      "section_title": "4.4 Operator precedence",
-      "page_start": 110,
-      "page_end": 111,
-      "text": "Introduction to Python Programming | 4.4 Operator precedence\n• Avoid spaces immediately inside parentheses.\nAvoid: x = ( 4 * y )\nBetter: x = (4 * y)\n• Surround the following operators with one space: assignment, augment assignment, comparison,\nBoolean.\nAvoid: x= y<44\nBetter: x = y < 44\n• Consider adding whitespace around operators with lower priority.\nAvoid: x = 5 * z+20\nBetter: x = 5*z + 20"
+      "section_title": "13.1 Inheritance basics",
+      "page_start": 297,
+      "page_end": 297,
+      "text": "Introduction to Python Programming | 13.1 Inheritance basics\n13.1 Inheritance basics\n13.2 Attribute access\n13.3 Methods\n13.4 Hierarchical inheritance\n13.5 Multiple inheritance and mixin classes\n13.6 Chapter summary\nIntroduction\nReal-world entities are often described in relation to other entities. Ex: A finch is a type of bird. Similarly,\nclasses, which represent types of real-world entities, can be related to each other.\nInheritance describes the relationship in which one class is a type of another class. Classes within inheritance\nrelationships can inherit attributes and methods from other classes without needing to redefine everything.\nThus, inheritance in object-oriented programming reduces redundancy and promotes modularity.\n13.1 Inheritance basics\nLearning objectives\nBy the end of this section you should be able to"
     }
   ],
   "meta": {

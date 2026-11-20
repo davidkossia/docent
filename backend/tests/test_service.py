@@ -1,3 +1,4 @@
+import http.client
 import json
 import threading
 import urllib.error
@@ -10,7 +11,7 @@ from langchain_core.documents import Document
 
 from docent.answer import NO_ANSWER
 from docent.index import Hit
-from docent.server import FIXTURES, fake_ask, make_handler
+from docent.server import FIXTURES, MAX_BODY, fake_ask, make_handler
 from docent.service import ServiceError, ask
 
 
@@ -102,6 +103,27 @@ def test_max_tokens_and_failures_map_to_contract_errors():
     assert (e.value.status, e.value.code) == (504, "timeout")
 
 
+def test_retriever_failure_is_an_upstream_error():
+    class Broken:
+        def search(self, question, k):
+            raise RuntimeError("index down")
+
+    with pytest.raises(ServiceError) as e:
+        ask("q", Broken(), _client([_text("A.", 0)]))
+    assert (e.value.status, e.value.code) == (502, "upstream_error")
+
+
+def test_no_text_reply_is_an_upstream_error():
+    with pytest.raises(ServiceError) as e:
+        ask("q", Retriever(), _client([]))
+    assert (e.value.status, e.value.code) == (502, "upstream_error")
+
+
+def test_no_answer_fixture_passages_are_off_topic():
+    body = json.loads((FIXTURES / "no_answer.json").read_text())
+    assert not any("precedence" in p["section_title"].lower() for p in body["passages"])
+
+
 def test_fixtures_are_valid_contract_bodies():
     for name in ("answered", "no_answer", "refused"):
         body = json.loads((FIXTURES / f"{name}.json").read_text())
@@ -140,6 +162,14 @@ def test_http_server_serves_fake_fixtures_and_errors():
         status, body, _ = _post(port, json.dumps({"question": "x" * 501}).encode())
         assert (status, body["error"]["code"]) == (400, "invalid_question")
         assert _post(port, b"not json")[0] == 400
+        for bad in ("abc", "-5", str(MAX_BODY + 1)):
+            conn = http.client.HTTPConnection("127.0.0.1", port)
+            conn.putrequest("POST", "/ask")
+            conn.putheader("Content-Length", bad)
+            conn.endheaders()
+            r = conn.getresponse()
+            assert (r.status, json.loads(r.read())["error"]["code"]) == (400, "invalid_question"), bad
+            conn.close()
         assert _post(port, b"{}", path="/nope")[0] == 404
     finally:
         server.shutdown()

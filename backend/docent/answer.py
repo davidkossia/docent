@@ -92,6 +92,8 @@ def parse_response(resp, hits: list[Hit]) -> Answer:
                 cites.append(cite)
         segments.append(Segment(block.text, cites))
     text = "".join(s.text for s in segments).strip()
+    if not text:
+        raise UpstreamError("Claude returned no text")
     no_answer = text.startswith(NO_ANSWER)
     if no_answer:
         segments = [Segment(NO_ANSWER)]
