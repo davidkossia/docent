@@ -4,15 +4,26 @@ Docent answers questions over technical documentation and cites the exact passag
 
 Docent is a 2026 rebuild of CourseVector, an earlier project of mine whose repository was lost. This code is new. It is not the original.
 
-**Status:** under construction. See [PLAN.md](PLAN.md) for milestones. Sections marked "pending" fill in as each milestone lands.
-
 ## What it does
 
-- Ingests about 1,000 pages of openly licensed technical text, splits it into chunks, embeds them, and indexes them.
-- Retrieves the top passages for a question (LangChain and Pinecone).
-- Asks Claude to answer from those passages only. Passages go in as `document` blocks with citations enabled, so each claim links to its source passage.
+- Loads two OpenStax textbooks (1,256 content pages), splits them into chunks, embeds the chunks, and indexes them.
+- Retrieves the top passages for a question. LangChain supplies the text splitters and the Pinecone store.
+- Asks Claude to answer from those passages only. The passages go in as `document` blocks with citations enabled, so each claim links to its source passage.
 - Refuses when the passages do not answer the question.
-- Serves the answer through an API (AWS Lambda behind API Gateway) to a React chat UI with citation chips that open the source passage.
+- Serves the answer through `POST /ask` ([contract](docs/api.md)) to a React chat UI. Citation chips open the source passage.
+
+## Status
+
+| Part | State |
+|---|---|
+| Ingest and chunking (seven strategies) | Done |
+| Retrieval eval: 144 questions, 14 setups | Done. Results follow. |
+| Local API server and chat UI | Done. Runs locally. |
+| Answer eval with Claude | Not run. It needs an Anthropic key and a $10 spending cap. |
+| Pinecone index | Not created. The `index` command exists and needs a Pinecone key. |
+| AWS deploy (Lambda, API Gateway, daily question cap) | Built and synthesized. Not deployed. |
+
+No live demo exists. The retrieval numbers below are the only measured results.
 
 ## Architecture
 
@@ -26,11 +37,15 @@ browser --> API Gateway --> Lambda: embed query --> top-k chunks -+
 
 | Part | Where | Stack |
 |---|---|---|
-| Ingest, retrieval, answers, eval | `backend/` | Python, LangChain, Pinecone, Anthropic SDK |
+| Ingest, retrieval, answers, eval | `backend/` | Python, LangChain, Anthropic SDK, Pinecone |
 | Infrastructure | `infra/` | AWS CDK (TypeScript) |
 | Chat UI | `web/` | React, TypeScript, Vite |
 
+Locally, the index is a file of vectors and the embedder is a local ONNX model, so retrieval needs no key. The planned deployment uses Pinecone and a Pinecone-hosted embedder.
+
 ## Eval results
+
+The eval measures retrieval only: whether the passage that holds the answer reaches the model. It has 144 questions written by Claude from the book text: 120 answerable (40 `lookup`, 50 `paraphrase`, 30 `code`) and 24 unanswerable (12 off-topic, 12 near-miss). Each answerable question stores a verbatim evidence quote from its gold section. The questions split evenly into dev (72) and test (72); the 60 answerable test questions set the recall figures. A retrieved chunk is a hit when it contains at least 70% of the evidence quote, so a hit means the answer text arrived, not only the right section. The selection rule picks the setup with the best dev recall@5 and reports every setup on test, with no changes to questions or setups after test numbers existed. Limits: 60 test questions give wide intervals (about 13 points either side), and a model wrote the questions, so they can favor the wording of the text. The `paraphrase` type and its word-overlap check reduce that bias but do not remove it. Full design: [PLAN.md](PLAN.md).
 
 <!-- eval:start -->
 Evidence recall@k and MRR@5 by split. Won / lost counts test questions answered in the top 5 that the `fixed-1000` baseline with the same embedder misses (won) or answers (lost).
@@ -53,39 +68,87 @@ Evidence recall@k and MRR@5 by split. Won / lost counts test questions answered 
 | section-1200 | local-bge-base | 2,780 | 66.7% | 0.496 | 28.3% | 55.0% | 65.0% (53.3% to 76.7%) | 0.424 | 78.3% | 6 / 4 |
 <!-- eval:end -->
 
+At 60 test questions, no chunking or embedder change is statistically significant. The selected setup, `section-800` with `local-bge-small`, scores 53.3% test recall@5 against 51.7% for the `fixed-1000` baseline, and the intervals overlap almost entirely. The embedder gap is the larger lead: `local-bge-base` scores higher than `local-bge-small` with six of the seven chunking strategies and ties on the seventh, but those intervals overlap too, so it is a lead to test with more questions and not a result. This eval does not show that tuning raised retrieval quality.
+
 ## Repository layout
 
 ```
-backend/   Python package, tests, eval data (ingest and chunking exist; eval and API pending)
-web/       Vite + React + TypeScript chat UI (placeholder page)
-infra/     AWS CDK app (empty stack; Lambda and API Gateway pending)
+backend/   Python package (docent/), tests, eval questions and results
+web/       Vite + React + TypeScript chat UI
+infra/     AWS CDK app: Lambda, API Gateway, DynamoDB daily counter
+docs/      API contract
 ```
 
 ## Run it
 
-Available now:
+You need Python 3.12 with [uv](https://docs.astral.sh/uv/), and Node 22. Run each block from the repository root.
+
+Set up the backend and download the corpus (two PDFs, 1,336 pages, saved to `backend/data/raw`):
 
 ```bash
 cd backend
 uv venv --python 3.12 && uv pip install -e ".[local,dev]"
-.venv/bin/python -m docent download   # fetches the two PDFs into backend/data/raw
-.venv/bin/python -m pytest
+.venv/bin/python -m docent download
 ```
+
+Run the tests and the question-file check. Neither needs a key:
 
 ```bash
-cd web && npm install && npm run build
-cd infra && npm install && npx cdk synth -c allowedOrigin=http://localhost:5173
+cd backend
+.venv/bin/python -m pytest
+.venv/bin/python -m docent eval-validate
 ```
 
-The eval, API, and UI commands land with their milestones.
+Run the retrieval eval and rewrite the results table in this README. The first run embeds every chunk with local models and takes a long time; later runs reuse the cached indexes in `backend/data/indexes`. Narrow the run with `--strategies` and `--embedders` (see `--help`).
+
+```bash
+cd backend
+.venv/bin/python -m docent eval-retrieval
+.venv/bin/python -m docent report
+```
+
+Run the API on `http://localhost:8787/ask` and the chat UI on `http://localhost:5173`. The UI reads `VITE_API_URL` and defaults to the local API.
+
+```bash
+# Terminal 1. --fake answers from web/src/fixtures and calls no model.
+cd backend
+.venv/bin/python -m docent serve --fake
+
+# Terminal 2
+cd web
+npm ci
+npm run dev
+```
+
+To answer with Claude instead, copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`. Build the default local index once (`section-800` with `local-bge-small`), then drop `--fake`. Each question costs about $0.03.
+
+```bash
+cd backend
+.venv/bin/python -m docent eval-retrieval --strategies section-800 --embedders local-bge-small
+.venv/bin/python -m docent serve
+```
+
+Test and build the UI and the infrastructure code:
+
+```bash
+cd web && npm ci && npm run build && npm test
+cd infra && npm ci && npm run build && npm test
+```
+
+Synthesize the CloudFormation template. The CDK app needs the Lambda bundle first, which `build_lambda.sh` builds from committed code with `uv`. This does not deploy anything.
+
+```bash
+infra/scripts/build_lambda.sh
+cd infra && npx cdk synth -c allowedOrigin=http://localhost:5173
+```
 
 ## Keys
 
-Copy `.env.example` to `.env` and fill it in. `.env` is git-ignored. Nothing in this repo needs a key to read, and ingest plus the retrieval eval run with no key.
+`.env` is git-ignored. Nothing here needs a key to read. Tests, `eval-validate`, `eval-retrieval`, `report`, `serve --fake`, and the UI run with no key. `serve` needs `ANTHROPIC_API_KEY`. `index` needs `PINECONE_API_KEY`. `eval-answers` calls Claude, costs money, and needs `--yes`.
 
 ## Corpus and attribution
 
-The corpus is two OpenStax textbooks, downloaded by a script and not stored in this repo:
+The corpus is two OpenStax textbooks. A script downloads them and this repo does not store them:
 
 - *Introduction to Python Programming*, OpenStax, Rice University.
 - *Introduction to Computer Science*, OpenStax, Rice University.
@@ -94,4 +157,4 @@ Both are licensed [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-s
 
 ## License
 
-Code: [MIT](LICENSE). The textbooks keep their own license.
+Code: [MIT](LICENSE). The textbooks keep their own license, CC BY-NC-SA 4.0.
