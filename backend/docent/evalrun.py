@@ -17,6 +17,12 @@ from .config import CLAUDE_MODEL, EVAL_DIR, FALLBACK_BETA, ROOT
 from .embeddings import get_embedder
 from .index import LocalIndex
 from .ingest import Section, clean_text, load_sections
+from .pricing import (
+    ANSWER_MAX_TOKENS,
+    PRICES,
+    UNKNOWN_MODEL_PRICES,
+    WORST_CASE_CALL_USD,
+)
 
 QUESTIONS_PATH = EVAL_DIR / "questions.jsonl"
 RESULTS_DIR = EVAL_DIR / "results"
@@ -392,16 +398,6 @@ def write_report(readme=README_PATH, results_dir=RESULTS_DIR) -> None:
 
 # ---------- answer eval (calls Claude; costs money) ----------
 
-# USD per 1M tokens: (input, output, cache read, cache write 5 min). Source: claude-api skill model table.
-PRICES = {
-    "claude-opus-5-5": (4.0, 20.0, 0.20, 5.0),
-    "claude-opus-5": (5.0, 25.0, 0.50, 6.25),
-    "claude-opus-4-8": (5.0, 25.0, 0.50, 6.25),
-}
-UNKNOWN_MODEL_PRICES = PRICES["claude-opus-5"]  # the dearest known model, so an unknown one is not under-counted
-ANSWER_MAX_TOKENS = 16000  # answer.py
-# Worst case for one answer call: max_tokens of output plus 6,000 input tokens, both at the dearest fallback rates.
-WORST_CASE_CALL_USD = (ANSWER_MAX_TOKENS * UNKNOWN_MODEL_PRICES[1] + 6000 * UNKNOWN_MODEL_PRICES[0]) / 1e6
 # Estimates for the dry run: 5 passages in, a short cited answer out, thinking tokens included.
 EST_ANSWER_CALL_USD = 0.03
 EST_JUDGE_CALL_USD = 0.008
@@ -596,8 +592,13 @@ def run_answers(setups: list[str], max_usd: float, yes: bool, questions_path=QUE
     spend recorded in the results file, so earlier runs count against it. The check runs before every call,
     so the total can pass `max_usd` by at most one call (see `WORST_CASE_CALL_USD`).
     """
+    import math
+
     from .service import ServiceError, ask
 
+    if not math.isfinite(max_usd) or max_usd < 0:
+        raise SystemExit(f"--max-usd must be a finite number of at least 0, got {max_usd}")
+    setups = list(dict.fromkeys(setups))
     for s in setups:
         parse_setup(s)
     questions = [q for q in load_questions(questions_path) if q.split == "test"]
@@ -619,7 +620,8 @@ def run_answers(setups: list[str], max_usd: float, yes: bool, questions_path=QUE
         print(f"{n_answer} still to run; the rest are in {out}")
     print(f"{n_judge} judge calls at most; estimated cost ${est:.2f} at {CLAUDE_MODEL}")
     print(f"Budget ${max_usd:.2f} covers the ${prior:.2f} already spent in {out}. The check runs before each call, "
-          f"so the total can pass it by up to ${WORST_CASE_CALL_USD:.2f} (one answer call at max_tokens {ANSWER_MAX_TOKENS}).")
+          f"so the total can pass it by up to ${WORST_CASE_CALL_USD:.2f} per answer call (one attempt on {CLAUDE_MODEL} "
+          f"plus one fallback attempt, each at max_tokens {ANSWER_MAX_TOKENS}).")
     if prior + est > max_usd:
         print("The estimate is over the remaining budget; the run stops cleanly when it reaches the budget.")
     if not yes:
@@ -643,11 +645,6 @@ def run_answers(setups: list[str], max_usd: float, yes: bool, questions_path=QUE
             return True
         return False
 
-    for entry in data["setups"].values():  # error rows rerun; their cost stays in the file total
-        keep = [r for r in entry["rows"] if r["status"] != "error"]
-        data["dropped_cost_usd"] = round(data["dropped_cost_usd"] + sum(
-            r["cost_usd"] for r in entry["rows"] if r["status"] == "error"), 6)
-        entry["rows"] = keep
     data["stopped"] = None
     _save_answers(out, data)
 
@@ -661,6 +658,10 @@ def run_answers(setups: list[str], max_usd: float, yes: bool, questions_path=QUE
         if stop:
             break
         entry = data["setups"].setdefault(setup, {"rows": []})
+        # Error rows rerun; their cost stays in the file total. Only setups in this run are touched.
+        dropped = [r for r in entry["rows"] if r["status"] == "error"]
+        entry["rows"] = [r for r in entry["rows"] if r["status"] != "error"]
+        data["dropped_cost_usd"] = round(data["dropped_cost_usd"] + sum(r["cost_usd"] for r in dropped), 6)
         ref = {q.id: q for q in questions}
         pending = [r for r in entry["rows"] if _needs_judge(r)]
         if not todo[setup] and not pending:
@@ -696,19 +697,24 @@ def run_answers(setups: list[str], max_usd: float, yes: bool, questions_path=QUE
             except Exception as exc:  # noqa: BLE001 - keep the run going; the row records the failure
                 row = evaluate_question(q, {"status": "error", "segments": [], "passages": []})
                 row["error"] = f"{type(exc).__name__}: {exc}"
-            if row["answerable"] and row["status"] == "answered":
-                # The answer is paid for. Keep it whatever happens to the judge call.
+            row["cost_usd"] = round(meter.cost_usd - before, 6)
+            answered = row["answerable"] and row["status"] == "answered"
+            if answered:
+                row["judge_error"] = "not run: interrupted"  # a rerun judges the row if we stop before the verdict
+            entry["rows"].append(row)
+            _save_answers(out, data)  # the paid answer is on disk before the judge call starts
+            if answered:
                 if over_budget():
                     row["judge_error"] = "not run: budget reached"
                     stop = True
                 else:
+                    mid = meter.cost_usd
                     try:
                         judge(row, q.question, q.answer)
                     except Exception as exc:  # noqa: BLE001
                         row["judge_error"] = f"{type(exc).__name__}: {exc}"
-            row["cost_usd"] = round(meter.cost_usd - before, 6)
-            entry["rows"].append(row)
-            _save_answers(out, data)
+                    row["cost_usd"] = round(row["cost_usd"] + meter.cost_usd - mid, 6)
+                _save_answers(out, data)
             print(f"   {q.id} {row['status']} grounded={row['grounded']} correct={row['correct']} "
                   f"spent ${spent():.3f}", flush=True)
             if stop:
@@ -728,15 +734,15 @@ def answers_table(data: dict) -> str:
         "question answered with no_answer."
         + (" The run stopped at its budget; rows are partial." if data.get("stopped") else ""),
         "",
-        "| Setup | Answerable / unanswerable | Grounded | Judged correct | Refusal accuracy | Wrong refusal | Errors | Cost |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "| Setup | Answerable / unanswerable | Grounded | Judged correct | Refusal accuracy | Wrong refusal | Errors | Judge errors | Cost |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, e in data["setups"].items():
         m = e["metrics"]
         lines.append(
             f"| {name} | {m['n_answerable']} / {m['n_unanswerable']} | {pct(m['grounded_rate'])} "
             f"| {pct(m['judged_correct_rate'])} | {pct(m['refusal_accuracy'])} | {pct(m['wrong_refusal_rate'])} "
-            f"| {m['errors']} | ${m['cost_usd']:.2f} |"
+            f"| {m['errors']} | {m['judge_errors']} | ${m['cost_usd']:.2f} |"
         )
     lines.append(f"\nTotal cost: ${data['cost_usd']:.2f}")
     return "\n".join(lines)

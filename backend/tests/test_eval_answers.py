@@ -304,9 +304,64 @@ def test_cost_without_iterations_uses_the_response_model_and_cache_rates():
 def test_judge_model_is_saved_and_worst_case_is_printed(tmp_path, capsys):
     data = _run(tmp_path, FakeClient())
     assert data["setups"][SETUP]["rows"][0]["judge_model"] == "claude-opus-5-5"
-    assert "up to $0.43" in capsys.readouterr().out
-    assert WORST_CASE_CALL_USD == pytest.approx(0.43)
+    assert "up to $0.77 per answer call" in capsys.readouterr().out
+    assert WORST_CASE_CALL_USD == pytest.approx(0.774, abs=0.001)
 
 
 def test_dry_run_estimate_for_three_setups_stays_in_range():
     assert 5 <= estimate_usd(216, 180) <= 10
+
+
+def test_a_run_leaves_other_setups_error_rows_alone(tmp_path):
+    other = "section-800__local-bge-base"
+    c = FakeClient(truncate=["q2"], tokens=(100_000, 10_000))
+    _run(tmp_path, c, setups=(other,))  # setup B gets an error row for q2
+    path = tmp_path / "answers.json"
+    before = json.loads(path.read_text())["setups"][other]
+    data = _run(tmp_path, FakeClient(), setups=(SETUP,))  # a run over setup A only
+    assert data["setups"][other]["rows"] == before["rows"]
+    assert data["setups"][other]["metrics"] == before["metrics"]
+    assert any(r["status"] == "error" for r in data["setups"][other]["rows"])
+    assert data["dropped_cost_usd"] == 0
+
+
+def test_answer_row_is_saved_before_the_judge_call(tmp_path):
+    saved = {}
+
+    class Boom(BaseException):  # an interrupt: not caught by `except Exception`
+        pass
+
+    c = FakeClient()
+    real = c.beta.messages.create
+
+    def create(**kw):
+        if "format" in kw["output_config"]:
+            saved["rows"] = json.loads((tmp_path / "answers.json").read_text())["setups"][SETUP]["rows"]
+            raise Boom
+        return real(**kw)
+
+    c.beta = NS(messages=NS(create=create))
+    with pytest.raises(Boom):
+        _run(tmp_path, c)
+    assert saved["rows"][0]["id"] == "q1" and saved["rows"][0]["cost_usd"] > 0
+    assert saved["rows"][0]["judge_error"]  # a rerun will judge it
+    data = _run(tmp_path, FakeClient())
+    assert data["setups"][SETUP]["rows"][0]["correct"] is True
+
+
+def test_max_usd_must_be_finite_and_not_negative(tmp_path):
+    for bad in (float("nan"), float("inf"), -1.0):
+        with pytest.raises(SystemExit):
+            _run(tmp_path, FakeClient(), max_usd=bad)
+
+
+def test_duplicate_setups_run_once(tmp_path):
+    c = FakeClient()
+    data = _run(tmp_path, c, setups=(SETUP, SETUP))
+    assert len(data["setups"][SETUP]["rows"]) == 3 and len(_calls(c, judge=False)) == 3
+
+
+def test_answer_table_shows_judge_errors(tmp_path):
+    data = _run(tmp_path, FakeClient(judge_raises=True))
+    assert "Judge errors" in answers_table(data)
+    assert "| 2 |" in answers_table(data)

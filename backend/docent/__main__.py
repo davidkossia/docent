@@ -6,7 +6,17 @@ import argparse
 from .chunking import STRATEGIES
 from .corpus import download
 from .embeddings import NAMES
+from .pricing import WORST_CASE_CALL_USD
 from .server import FIXTURE_NAMES
+
+
+def _max_usd(text: str) -> float:
+    import math
+
+    value = float(text)
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError("must be a finite number of at least 0")
+    return value
 
 
 def main() -> int:
@@ -25,7 +35,9 @@ def main() -> int:
     a = sub.add_parser("eval-answers", help="grounded-answer rate and refusals (calls Claude, costs money)")
     a.add_argument("--setups", nargs="+", required=True, metavar="STRATEGY__EMBEDDER",
                    help="for example section-800__local-bge-small (test split, answer + judge calls)")
-    a.add_argument("--max-usd", type=float, default=10.0, help="stop cleanly when total spend in the results file reaches this; can overshoot by one call, up to about $0.43")
+    a.add_argument("--max-usd", type=_max_usd, default=10.0,
+                   help="stop cleanly when total spend in the results file reaches this; one answer call can overshoot it "
+                        f"by up to ${WORST_CASE_CALL_USD:.2f}")
     a.add_argument("--yes", action="store_true", help="spend the money (without it, print the estimate and exit)")
     a.add_argument("--questions", default=None, help="question file (default: eval/questions.jsonl)")
     a.add_argument("--out", default=None, help="results file (default: eval/results/answers.json)")
