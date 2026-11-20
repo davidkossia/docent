@@ -57,7 +57,7 @@ uv venv --python 3.12 && uv pip install -e ".[local,dev]"
 
 ```bash
 cd web && npm install && npm run build
-cd infra && npm install && npx cdk synth
+cd infra && npm install && npx cdk synth -c allowedOrigin=http://localhost:5173
 ```
 
 The eval, API, and UI commands land with their milestones.

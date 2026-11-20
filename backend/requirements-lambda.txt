@@ -1,0 +1,13 @@
+# What the Lambda's query path imports: lambda_handler -> service, answer, index, pinecone_store.
+# No pypdf, fastembed or openai: the Lambda retrieves and answers; it never ingests or embeds locally.
+# boto3 is not listed: the Lambda Python runtime provides it.
+# infra/scripts/lock_lambda.sh compiles this file with infra/scripts/lambda-overrides.txt (which drops
+# langchain-pinecone's unused langchain-openai, openai and tiktoken) into requirements-lambda.lock;
+# build_lambda.sh installs only from that hash-locked file.
+anthropic==2.12.0
+langchain-core==1.8.4
+langchain-pinecone==0.2.13
+pinecone==7.3.0
+numpy==2.5.5
+httpx==0.28.1
+python-dotenv==1.2.4

@@ -1,3 +1,8 @@
 {
-  "app": "npx ts-node --prefer-ts-exts bin/docent.ts"
+  "app": "npx ts-node --prefer-ts-exts bin/docent.ts",
+  "context": {
+    "region": "us-east-1",
+    "dailyLimit": 150,
+    "setup": "section-800__pinecone-e5"
+  }
 }
