@@ -6,7 +6,17 @@ import argparse
 from .chunking import STRATEGIES
 from .corpus import download
 from .embeddings import NAMES
+from .pricing import WORST_CASE_CALL_USD
 from .server import FIXTURE_NAMES
+
+
+def _max_usd(text: str) -> float:
+    import math
+
+    value = float(text)
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError("must be a finite number of at least 0")
+    return value
 
 
 def main() -> int:
@@ -23,9 +33,14 @@ def main() -> int:
     r.add_argument("--out", default=None, help="results file (default: eval/results/retrieval.json)")
     sub.add_parser("report", help="rewrite the eval block in README.md from the results files")
     a = sub.add_parser("eval-answers", help="grounded-answer rate and refusals (calls Claude, costs money)")
-    a.add_argument("--strategies", nargs="+", default=["section-800"], choices=list(STRATEGIES))
-    a.add_argument("--embedders", nargs="+", default=["local-bge-small"], choices=NAMES)
-    a.add_argument("--yes", action="store_true", help="spend the money")
+    a.add_argument("--setups", nargs="+", required=True, metavar="STRATEGY__EMBEDDER",
+                   help="for example section-800__local-bge-small (test split, answer + judge calls)")
+    a.add_argument("--max-usd", type=_max_usd, default=10.0,
+                   help="stop cleanly when total spend in the results file reaches this; one answer call can overshoot it "
+                        f"by up to ${WORST_CASE_CALL_USD:.2f}")
+    a.add_argument("--yes", action="store_true", help="spend the money (without it, print the estimate and exit)")
+    a.add_argument("--questions", default=None, help="question file (default: eval/questions.jsonl)")
+    a.add_argument("--out", default=None, help="results file (default: eval/results/answers.json)")
     sv = sub.add_parser("serve", help="run the local API on port 8787")
     sv.add_argument("--fake", nargs="?", const="auto", choices=["auto", *FIXTURE_NAMES], metavar="FIXTURE",
                     help="answer from web/src/fixtures without calling Claude")
@@ -68,9 +83,9 @@ def main() -> int:
 
         serve(args.fake, args.port)
     elif args.cmd == "eval-answers":
-        from .evalrun import run_answers
+        from .evalrun import QUESTIONS_PATH, run_answers
 
-        run_answers(args.strategies, args.embedders, args.yes)
+        run_answers(args.setups, args.max_usd, args.yes, args.questions or QUESTIONS_PATH, args.out)
     return 0
 
 
