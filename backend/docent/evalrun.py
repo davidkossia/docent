@@ -1,7 +1,4 @@
-"""Eval harness v2: question validation, evidence-hit retrieval metrics, report.
-
-The Claude half (answer eval) is at the bottom of this file and belongs to a later work package.
-"""
+"""Eval harness v2: question validation, evidence-hit retrieval metrics, answer eval, report."""
 from __future__ import annotations
 
 import json
@@ -16,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from .chunking import STRATEGIES, build_chunks
-from .config import EVAL_DIR, ROOT
+from .config import CLAUDE_MODEL, EVAL_DIR, FALLBACK_BETA, ROOT
 from .embeddings import get_embedder
 from .index import LocalIndex
 from .ingest import Section, clean_text, load_sections
@@ -371,11 +368,15 @@ def render_block(results_dir=RESULTS_DIR) -> str:
     if not path.exists():
         return "No results yet. Run `python -m docent eval-retrieval`, then `python -m docent report`."
     rows = json.loads(path.read_text())
-    return (
+    block = (
         "Evidence recall@k and MRR@5 by split. Won / lost counts test questions answered in the top 5 "
         f"that the `{BASELINE}` baseline with the same embedder misses (won) or answers (lost).\n\n"
         + retrieval_table(rows)
     )
+    ans_path = Path(results_dir) / "answers.json"
+    if ans_path.exists():
+        block += "\n\n" + answers_table(json.loads(ans_path.read_text()))
+    return block
 
 
 def write_report(readme=README_PATH, results_dir=RESULTS_DIR) -> None:
@@ -389,54 +390,253 @@ def write_report(readme=README_PATH, results_dir=RESULTS_DIR) -> None:
     print(f"updated {readme}")
 
 
-# --- Claude half: grounded-answer rate and refusals. Costs money; needs ANTHROPIC_API_KEY. ---
+# ---------- answer eval (calls Claude; costs money) ----------
 
-COST_PER_QUESTION_USD = 0.03  # Opus 5.5 at $4/$20 per 1M tokens, 5 passages, low effort (estimate)
+PRICE_IN_PER_TOKEN = 4 / 1_000_000  # claude-opus-5-5, USD
+PRICE_OUT_PER_TOKEN = 20 / 1_000_000
+# Estimates for the dry run: 5 passages in, a short cited answer out, thinking tokens included.
+EST_ANSWER_CALL_USD = 0.03
+EST_JUDGE_CALL_USD = 0.004
+ANSWERS_PATH = RESULTS_DIR / "answers.json"
+
+JUDGE_SYSTEM = (
+    "You grade an answer against a reference answer. Reply correct=true when the answer states the same "
+    "facts as the reference and contradicts nothing in it. Wording, order and extra true detail do not matter. "
+    "Reply correct=false when the answer misses the key fact, contradicts the reference, or declines to answer."
+)
+JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {"correct": {"type": "boolean"}},
+    "required": ["correct"],
+    "additionalProperties": False,
+}
 
 
-def eval_answers(strategy_name: str, embedder_name: str, k: int = 5, log=print) -> dict:
-    import anthropic
+class _MeteredMessages:
+    def __init__(self, meter, real):
+        self._meter, self._real = meter, real
 
-    from .answer import answer_question
+    def create(self, **kw):
+        resp = self._real.create(**kw)
+        usage = getattr(resp, "usage", None)
+        self._meter.input_tokens += getattr(usage, "input_tokens", 0) or 0
+        self._meter.output_tokens += getattr(usage, "output_tokens", 0) or 0
+        return resp
 
-    questions = load_questions()
-    docs = build_chunks(STRATEGIES[strategy_name], load_sections())
-    index = LocalIndex.build_cached(f"{strategy_name}__{embedder_name}", docs, get_embedder(embedder_name), log=log)
-    client = anthropic.Anthropic()
-    rows = []
-    for q in questions:
-        hits = index.search(q.question, k)
-        a = answer_question(client, q.question, hits)
-        cited = {c.section_id for c in a.citations}
-        in_gold = bool(q.gold_section) and any(q.gold_section in hits[c.rank - 1].doc.metadata["section_ids"] for c in a.citations)
-        rows.append({
-            "id": q.id, "answerable": bool(q.gold_section), "no_answer": a.no_answer,
-            "safety_refusal": a.safety_refusal, "n_citations": len(a.citations),
-            "cites_gold": in_gold, "cited_sections": sorted(cited), "answer": a.text, "usage": a.usage,
-        })
-        log(f"{q.id} answerable={bool(q.gold_section)} no_answer={a.no_answer} cites_gold={in_gold}")
-    ans = [r for r in rows if r["answerable"]]
-    unans = [r for r in rows if not r["answerable"]]
+
+class MeteredClient:
+    """Wraps a client and adds up token usage from every `beta.messages.create` call."""
+
+    def __init__(self, client):
+        self.input_tokens = 0
+        self.output_tokens = 0
+        beta = type("Beta", (), {})()
+        beta.messages = _MeteredMessages(self, client.beta.messages)
+        self.beta = beta
+
+    @property
+    def cost_usd(self) -> float:
+        return self.input_tokens * PRICE_IN_PER_TOKEN + self.output_tokens * PRICE_OUT_PER_TOKEN
+
+
+def parse_setup(name: str) -> tuple[str, str]:
+    """`section-800__local-bge-small` -> (strategy, embedder)."""
+    from .embeddings import NAMES
+
+    strategy, sep, embedder = name.partition("__")
+    if not sep or strategy not in STRATEGIES or embedder not in NAMES:
+        raise SystemExit(f"bad setup {name!r}: use <strategy>__<embedder>, for example section-800__local-bge-small")
+    return strategy, embedder
+
+
+def estimate_usd(n_answer_calls: int, n_judge_calls: int) -> float:
+    return n_answer_calls * EST_ANSWER_CALL_USD + n_judge_calls * EST_JUDGE_CALL_USD
+
+
+def judge_answer(client, question: str, reference: str, answer: str) -> bool | None:
+    """Ask the judge whether `answer` matches `reference`. None when the judge refuses or replies off-schema."""
+    prompt = f"Question: {question}\n\nReference answer: {reference}\n\nAnswer to grade: {answer}"
+    resp = client.beta.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=4000,  # thinking tokens count against this
+        betas=[FALLBACK_BETA],
+        fallbacks="default",
+        system=JUDGE_SYSTEM,
+        output_config={"effort": "low", "format": {"type": "json_schema", "schema": JUDGE_SCHEMA}},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if resp.stop_reason == "refusal":
+        return None
+    text = "".join(b.text for b in resp.content if b.type == "text")
+    try:
+        value = json.loads(text)["correct"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    return value if isinstance(value, bool) else None
+
+
+def evaluate_question(q: Question, body: dict) -> dict:
+    """Score one `service.ask` response body against its question (no judge yet)."""
+    answerable = q.type not in UNANSWERABLE
+    status = body["status"]
+    grounded = False
+    if answerable and status == "answered":
+        passages = body["passages"]
+        for seg in body["segments"]:
+            for c in seg["citations"]:
+                n = c["passage"]
+                if 1 <= n <= len(passages) and is_evidence_hit(passages[n - 1]["text"], q.evidence):
+                    grounded = True
+    text = "".join(seg["text"] for seg in body["segments"]).strip()
     return {
-        "strategy": strategy_name, "embedder": embedder_name,
-        "grounded_rate": round(sum(r["cites_gold"] and not r["no_answer"] for r in ans) / len(ans), 3),
-        "refusal_accuracy": round(sum(r["no_answer"] for r in unans) / len(unans), 3),
-        "wrong_refusal_rate": round(sum(r["no_answer"] for r in ans) / len(ans), 3),
-        "rows": rows,
+        "id": q.id, "type": q.type, "answerable": answerable, "status": status, "grounded": grounded,
+        "correct": None, "answer": text, "error": None, "cost_usd": 0.0,
     }
 
 
-def run_answers(strategies: list[str], embedders: list[str], yes: bool) -> None:
-    n = len(load_questions()) * len(strategies) * len(embedders)
-    print(f"{n} Claude calls, about ${n * COST_PER_QUESTION_USD:.2f} at claude-opus-5-5")
+def answer_metrics(rows: list[dict]) -> dict:
+    """The four answer metrics over the rows run so far. Errored rows count as misses."""
+    ans = [r for r in rows if r["answerable"]]
+    unans = [r for r in rows if not r["answerable"]]
+
+    def rate(hits: int, n: int):
+        return round(hits / n, 4) if n else None
+
+    return {
+        "n_answerable": len(ans),
+        "n_unanswerable": len(unans),
+        "errors": sum(1 for r in rows if r["status"] == "error"),
+        "grounded_rate": rate(sum(r["status"] == "answered" and r["grounded"] for r in ans), len(ans)),
+        "judged_correct_rate": rate(sum(r["correct"] is True for r in ans), len(ans)),
+        "refusal_accuracy": rate(sum(r["status"] == "no_answer" for r in unans), len(unans)),
+        "wrong_refusal_rate": rate(sum(r["status"] == "no_answer" for r in ans), len(ans)),
+        "cost_usd": round(sum(r["cost_usd"] for r in rows), 4),
+    }
+
+
+def _load_answers(path: Path) -> dict:
+    if path.exists():
+        return json.loads(path.read_text())
+    return {"model": CLAUDE_MODEL, "setups": {}, "cost_usd": 0.0, "stopped": None}
+
+
+def _save_answers(path: Path, data: dict) -> None:
+    for entry in data["setups"].values():
+        entry["metrics"] = answer_metrics(entry["rows"])
+    data["cost_usd"] = round(sum(e["metrics"]["cost_usd"] for e in data["setups"].values()), 4)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    tmp.replace(path)
+
+
+def _local_retriever(setup: str):
+    from .embeddings import get_embedder
+    from .service import LocalRetriever
+
+    strategy, embedder_name = parse_setup(setup)
+    docs = build_chunks(STRATEGIES[strategy], load_sections())
+    index = LocalIndex.build_cached(setup, docs, get_embedder(embedder_name), log=print)
+    return LocalRetriever(index)
+
+
+def run_answers(setups: list[str], max_usd: float, yes: bool, questions_path=QUESTIONS_PATH, out_path=None,
+                client=None, retriever_factory=None, k: int = 5) -> dict | None:
+    """Answer every test question for each setup, then score. Without `yes`, print the estimate and stop.
+
+    Writes the results file after each question. A rerun skips questions that already have a row
+    (rows with status `error` run again). `max_usd` caps the spend of this run, not of earlier runs.
+    """
+    from .service import ServiceError, ask
+
+    for s in setups:
+        parse_setup(s)
+    questions = [q for q in load_questions(questions_path) if q.split == "test"]
+    out = Path(out_path) if out_path else ANSWERS_PATH
+    data = _load_answers(out)
+
+    def done_ids(setup):
+        rows = data["setups"].get(setup, {}).get("rows", [])
+        return {r["id"] for r in rows if r["status"] != "error"}
+
+    todo = {s: [q for q in questions if q.id not in done_ids(s)] for s in setups}
+    n_answer = sum(len(v) for v in todo.values())
+    n_judge = sum(1 for v in todo.values() for q in v if q.type not in UNANSWERABLE)
+    est = estimate_usd(n_answer, n_judge)
+    print(f"{len(questions) * len(setups)} answer calls ({len(questions)} test questions x {len(setups)} setups)")
+    if n_answer < len(questions) * len(setups):
+        print(f"{n_answer} still to run; the rest are in {out}")
+    print(f"{n_judge} judge calls at most; estimated cost ${est:.2f} at {CLAUDE_MODEL} (budget ${max_usd:.2f})")
+    if est > max_usd:
+        print("The estimate is over the budget; the run stops cleanly when it reaches the budget.")
     if not yes:
         print("Dry run. Pass --yes to spend it.")
-        return
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out = []
-    for e in embedders:
-        for s in strategies:
-            out.append(eval_answers(s, e))
-    (RESULTS_DIR / "answers.json").write_text(json.dumps(out, indent=2) + "\n")
-    for r in out:
-        print(r["strategy"], r["embedder"], "grounded", r["grounded_rate"], "refusal", r["refusal_accuracy"])
+        return None
+
+    if client is None:
+        import anthropic
+
+        client = anthropic.Anthropic()
+    meter = MeteredClient(client)
+    data["stopped"] = None
+    stop = False
+    for setup in setups:
+        if stop:
+            break
+        entry = data["setups"].setdefault(setup, {"rows": []})
+        entry["rows"] = [r for r in entry["rows"] if r["status"] != "error"]
+        if not todo[setup]:
+            continue
+        print(f"== {setup}", flush=True)
+        retriever = (retriever_factory or _local_retriever)(setup)
+        for q in todo[setup]:
+            before = meter.cost_usd
+            try:
+                body = ask(q.question, retriever, meter, k=k)
+                row = evaluate_question(q, body)
+                if row["answerable"] and row["status"] == "answered":
+                    row["correct"] = judge_answer(meter, q.question, q.answer, row["answer"])
+            except ServiceError as exc:
+                row = evaluate_question(q, {"status": "error", "segments": [], "passages": []})
+                row["error"] = f"{exc.code}: {exc.message}"
+            except Exception as exc:  # noqa: BLE001 - keep the run going; the row records the failure
+                row = evaluate_question(q, {"status": "error", "segments": [], "passages": []})
+                row["error"] = f"{type(exc).__name__}: {exc}"
+            row["cost_usd"] = round(meter.cost_usd - before, 6)
+            entry["rows"].append(row)
+            _save_answers(out, data)
+            print(f"   {q.id} {row['status']} grounded={row['grounded']} correct={row['correct']} "
+                  f"spent ${meter.cost_usd:.3f}", flush=True)
+            if meter.cost_usd >= max_usd:
+                data["stopped"] = "budget"
+                stop = True
+                print(f"Stopped: spend ${meter.cost_usd:.2f} reached the ${max_usd:.2f} budget. "
+                      "Rerun to resume.")
+                break
+    _save_answers(out, data)
+    print(f"wrote {out}; total cost ${data['cost_usd']:.2f}")
+    return data
+
+
+def answers_table(data: dict) -> str:
+    def pct(v):
+        return "-" if v is None else f"{v:.1%}"
+
+    lines = [
+        f"Answer eval on the test split, judged by `{data.get('model', CLAUDE_MODEL)}`. "
+        "Grounded: answered with a citation to a chunk that holds the evidence. Wrong refusal: answerable "
+        "question answered with no_answer."
+        + (" The run stopped at its budget; rows are partial." if data.get("stopped") else ""),
+        "",
+        "| Setup | Answerable / unanswerable | Grounded | Judged correct | Refusal accuracy | Wrong refusal | Errors | Cost |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for name, e in data["setups"].items():
+        m = e["metrics"]
+        lines.append(
+            f"| {name} | {m['n_answerable']} / {m['n_unanswerable']} | {pct(m['grounded_rate'])} "
+            f"| {pct(m['judged_correct_rate'])} | {pct(m['refusal_accuracy'])} | {pct(m['wrong_refusal_rate'])} "
+            f"| {m['errors']} | ${m['cost_usd']:.2f} |"
+        )
+    lines.append(f"\nTotal cost: ${data['cost_usd']:.2f}")
+    return "\n".join(lines)
