@@ -45,3 +45,38 @@ def test_corpus_has_500_plus_pages():
     pages = {(s.book, p) for s in sections for p, _ in s.pages}
     assert len(pages) >= 500
     assert len(sections) > 100
+
+
+def test_ladder_matches_spec_and_drops_fixed_400():
+    assert list(STRATEGIES) == [
+        "fixed-1000", "fixed-800", "clean-800", "section-800-nohdr", "section-800", "section-500", "section-1200",
+    ]
+    spec = {
+        "fixed-1000": (1000, 200, False, False, False),
+        "fixed-800": (800, 100, False, False, False),
+        "clean-800": (800, 100, True, False, False),
+        "section-800-nohdr": (800, 100, True, True, False),
+        "section-800": (800, 100, True, True, True),
+        "section-500": (500, 80, True, True, True),
+        "section-1200": (1200, 150, True, True, True),
+    }
+    for name, (size, ov, clean, by_sec, hdr) in spec.items():
+        s = STRATEGIES[name]
+        assert (s.chunk_size, s.overlap, s.clean, s.by_section, s.header) == (size, ov, clean, by_sec, hdr)
+
+
+def test_nohdr_has_no_header_and_keeps_metadata_keys():
+    docs = build_chunks(STRATEGIES["section-800-nohdr"], _toy_sections())
+    assert docs and not any(d.page_content.startswith("Toy Book | ") for d in docs)
+    for key in ("book", "book_title", "section_id", "section_title", "section_ids", "page_start", "page_end", "chunk_id"):
+        assert key in docs[0].metadata
+    assert docs[0].metadata["chunk_id"].startswith("section-800-nohdr:")
+
+
+def test_clean_strategy_strips_footers_but_fixed_keeps_them():
+    sec = Section("t-1.1", "t", "Toy Book", "1.1 Alpha", 1,
+                  [(1, "body text here\nAccess for free at openstax.org\nmore body text")])
+    clean = build_chunks(STRATEGIES["clean-800"], [sec])
+    raw = build_chunks(STRATEGIES["fixed-800"], [sec])
+    assert all("openstax.org" not in d.page_content for d in clean)
+    assert any("openstax.org" in d.page_content for d in raw)

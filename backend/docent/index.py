@@ -4,6 +4,7 @@ Used for eval and for running the demo without Pinecone. `pinecone_store.py` ser
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,34 +34,53 @@ class LocalIndex:
         return m / np.maximum(np.linalg.norm(m, axis=-1, keepdims=True), 1e-9)
 
     @classmethod
-    def build(cls, docs, embedder: Embeddings, batch: int = 512, log=print) -> "LocalIndex":
+    def build(cls, docs, embedder: Embeddings, batch: int = 512, log=print) -> LocalIndex:
         vecs = []
         for i in range(0, len(docs), batch):
             vecs.extend(embedder.embed_documents([d.page_content for d in docs[i : i + batch]]))
             log(f"  embedded {min(i + batch, len(docs))}/{len(docs)}")
         return cls(docs, cls._normalize(np.array(vecs)), embedder)
 
+    @staticmethod
+    def fingerprint(docs, embedder_name: str) -> str:
+        """SHA-256 of the embedder name and every chunk's text and metadata, in order."""
+        h = hashlib.sha256()
+        h.update(embedder_name.encode())
+        for d in docs:
+            h.update(b"\0")
+            h.update(d.page_content.encode())
+            h.update(b"\0")
+            h.update(json.dumps(d.metadata, sort_keys=True).encode())
+        return h.hexdigest()
+
     @classmethod
-    def build_cached(cls, key: str, docs, embedder: Embeddings, log=print) -> "LocalIndex":
+    def build_cached(cls, key: str, docs, embedder: Embeddings, log=print) -> LocalIndex:
         path = INDEX_DIR / key
-        if (path / "vectors.npy").exists():
-            index = cls.load(path)
-            index.embedder = embedder
-            if len(index.docs) == len(docs):
+        name = getattr(embedder, "name", type(embedder).__name__)
+        digest = cls.fingerprint(docs, name)
+        meta = path / "meta.json"
+        if meta.exists() and (path / "vectors.npy").exists():
+            try:
+                stored = json.loads(meta.read_text()).get("sha256")
+            except (OSError, ValueError):
+                stored = None
+            if stored == digest:
+                index = cls.load(path)
+                index.embedder = embedder
                 return index
         index = cls.build(docs, embedder, log=log)
         index.save(path)
+        meta.write_text(json.dumps({"sha256": digest, "embedder": name, "chunks": len(docs)}) + "\n")
         return index
 
     def save(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
         np.save(path / "vectors.npy", self.matrix)
         with open(path / "docs.jsonl", "w") as f:
-            for d in self.docs:
-                f.write(json.dumps({"text": d.page_content, "meta": d.metadata}) + "\n")
+            f.writelines(json.dumps({"text": d.page_content, "meta": d.metadata}) + "\n" for d in self.docs)
 
     @classmethod
-    def load(cls, path: Path, embedder: Embeddings | None = None) -> "LocalIndex":
+    def load(cls, path: Path, embedder: Embeddings | None = None) -> LocalIndex:
         matrix = np.load(path / "vectors.npy")
         docs = []
         with open(path / "docs.jsonl") as f:
