@@ -23,17 +23,27 @@ class Strategy:
     description: str
 
 
+def _s(name, size, overlap, clean, by_section, header, description):
+    return Strategy(name, size, overlap, clean, by_section, header, description)
+
+
 STRATEGIES = {
     s.name: s
     for s in [
-        Strategy("fixed-1000", 1000, 200, False, False, False,
-                 "Raw page text, 1,000-character windows, 200 overlap, ignores section boundaries"),
-        Strategy("fixed-400", 400, 60, False, False, False,
-                 "Raw page text, 400-character windows, 60 overlap, ignores section boundaries"),
-        Strategy("section-800", 800, 100, True, True, True,
-                 "Cleaned text, split inside sections, 800 characters, 100 overlap, section title prepended"),
-        Strategy("section-500", 500, 80, True, True, True,
-                 "Cleaned text, split inside sections, 500 characters, 80 overlap, section title prepended"),
+        _s("fixed-1000", 1000, 200, False, False, False,
+           "Baseline: raw page text, 1,000-character windows, 200 overlap, ignores sections"),
+        _s("fixed-800", 800, 100, False, False, False,
+           "Raw page text, 800 characters, 100 overlap, ignores sections"),
+        _s("clean-800", 800, 100, True, False, False,
+           "Cleaned text (footers removed, hyphenation joined), 800 characters, 100 overlap, ignores sections"),
+        _s("section-800-nohdr", 800, 100, True, True, False,
+           "Cleaned text, split inside sections, 800 characters, 100 overlap, no title header"),
+        _s("section-800", 800, 100, True, True, True,
+           "Cleaned text, split inside sections, 800 characters, 100 overlap, book and section title header"),
+        _s("section-500", 500, 80, True, True, True,
+           "Cleaned text, split inside sections, 500 characters, 80 overlap, title header"),
+        _s("section-1200", 1200, 150, True, True, True,
+           "Cleaned text, split inside sections, 1,200 characters, 150 overlap, title header"),
     ]
 }
 
