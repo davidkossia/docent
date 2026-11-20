@@ -51,6 +51,14 @@ def test_max_tokens_is_an_upstream_error():
         parse_response(_resp([NS(type="text", text="cut", citations=None)], stop="max_tokens"), _hits())
 
 
+def test_end_turn_without_text_is_an_upstream_error():
+    with pytest.raises(UpstreamError):
+        parse_response(_resp([NS(type="thinking", thinking="...")]), _hits())
+    with pytest.raises(UpstreamError):
+        parse_response(_resp([]), _hits())
+    assert parse_response(_resp([], stop="refusal"), _hits()).safety_refusal  # refusal still wins
+
+
 def test_no_answer_and_safety_refusal_are_flagged():
     a = parse_response(_resp([NS(type="text", text=NO_ANSWER, citations=None)]), _hits())
     assert a.no_answer and not a.citations

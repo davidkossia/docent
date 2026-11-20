@@ -73,7 +73,10 @@ def ask(question, retriever: Retriever, client, k: int = 5) -> dict:
     """Return the section 5 response body, or raise `ServiceError`."""
     q = validate_question(question)
     start = time.monotonic()
-    hits = retriever.search(q, k)
+    try:
+        hits = retriever.search(q, k)
+    except Exception as exc:
+        raise ServiceError(502, "upstream_error", "Search failed. Try again.") from exc
     try:
         answer = answer_question(client, q, hits)
     except UpstreamError as exc:
