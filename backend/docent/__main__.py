@@ -6,6 +6,7 @@ import argparse
 from .chunking import STRATEGIES
 from .corpus import download
 from .embeddings import NAMES
+from .server import FIXTURE_NAMES
 
 
 def main() -> int:
@@ -25,6 +26,10 @@ def main() -> int:
     a.add_argument("--strategies", nargs="+", default=["section-800"], choices=list(STRATEGIES))
     a.add_argument("--embedders", nargs="+", default=["local-bge-small"], choices=NAMES)
     a.add_argument("--yes", action="store_true", help="spend the money")
+    sv = sub.add_parser("serve", help="run the local API on port 8787")
+    sv.add_argument("--fake", nargs="?", const="auto", choices=["auto", *FIXTURE_NAMES], metavar="FIXTURE",
+                    help="answer from web/src/fixtures without calling Claude")
+    sv.add_argument("--port", type=int, default=8787)
     args = p.parse_args()
     if args.cmd == "download":
         download()
@@ -44,6 +49,10 @@ def main() -> int:
         from .evalrun import write_report
 
         write_report()
+    elif args.cmd == "serve":
+        from .server import serve
+
+        serve(args.fake, args.port)
     elif args.cmd == "eval-answers":
         from .evalrun import run_answers
 

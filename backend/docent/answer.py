@@ -27,9 +27,22 @@ class Citation:
 
 
 @dataclass
-class Answer:
+class Segment:
+    """One text block of the answer, with the citations Claude attached to it."""
+
     text: str
     citations: list[Citation] = field(default_factory=list)
+
+
+class UpstreamError(Exception):
+    """Claude's reply cannot be used (for example, it hit max_tokens)."""
+
+
+@dataclass
+class Answer:
+    text: str  # all segment text joined
+    citations: list[Citation] = field(default_factory=list)  # every segment's citations, in order
+    segments: list[Segment] = field(default_factory=list)
     no_answer: bool = False  # the model said the docs do not answer
     safety_refusal: bool = False  # stop_reason == "refusal" after fallbacks
     served_by: str | None = None
@@ -52,30 +65,44 @@ def document_blocks(hits: list[Hit]) -> list[dict]:
     return blocks
 
 
+def _citation(hits: list[Hit], c) -> Citation | None:
+    idx = getattr(c, "document_index", None)
+    if idx is None or not 0 <= idx < len(hits):
+        return None
+    m = hits[idx].doc.metadata
+    return Citation(idx + 1, m["chunk_id"], m["section_id"], m["section_title"], m["book_title"],
+                    m["page_start"], m["page_end"], c.cited_text)
+
+
 def parse_response(resp, hits: list[Hit]) -> Answer:
     if resp.stop_reason == "refusal":
         return Answer("", safety_refusal=True, served_by=getattr(resp, "model", None))
-    text_parts: list[str] = []
-    citations: list[Citation] = []
+    if resp.stop_reason == "max_tokens":
+        raise UpstreamError("Claude hit max_tokens before finishing the answer")
+    segments: list[Segment] = []
     for block in resp.content:
         if block.type != "text":
             continue
-        text_parts.append(block.text)
+        seen: set[tuple[int, str]] = set()
+        cites: list[Citation] = []
         for c in getattr(block, "citations", None) or []:
-            idx = getattr(c, "document_index", None)
-            if idx is None or not 0 <= idx < len(hits):
-                continue
-            m = hits[idx].doc.metadata
-            citations.append(
-                Citation(idx + 1, m["chunk_id"], m["section_id"], m["section_title"], m["book_title"],
-                         m["page_start"], m["page_end"], c.cited_text)
-            )
-    text = "".join(text_parts).strip()
+            cite = _citation(hits, c)
+            if cite and (cite.rank, cite.cited_text) not in seen:
+                seen.add((cite.rank, cite.cited_text))
+                cites.append(cite)
+        segments.append(Segment(block.text, cites))
+    text = "".join(s.text for s in segments).strip()
+    if not text:
+        raise UpstreamError("Claude returned no text")
+    no_answer = text.startswith(NO_ANSWER)
+    if no_answer:
+        segments = [Segment(NO_ANSWER)]
     usage = resp.usage
     return Answer(
         text=text,
-        citations=citations,
-        no_answer=text.startswith(NO_ANSWER),
+        citations=[c for s in segments for c in s.citations],
+        segments=segments,
+        no_answer=no_answer,
         served_by=getattr(resp, "model", None),
         usage={"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
     )
@@ -85,7 +112,7 @@ def answer_question(client, question: str, hits: list[Hit], effort: str = "low")
     """One Claude call. Passages are `document` blocks with citations on; safety fallbacks are on."""
     resp = client.beta.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=2000,
+        max_tokens=16000,  # thinking tokens count against this
         betas=[FALLBACK_BETA],
         fallbacks="default",
         system=SYSTEM,

@@ -1,0 +1,61 @@
+{
+  "status": "no_answer",
+  "segments": [
+    {
+      "text": "The documentation does not answer this question.",
+      "citations": []
+    }
+  ],
+  "passages": [
+    {
+      "n": 1,
+      "chunk_id": "section-800:2",
+      "book_title": "Introduction to Python Programming",
+      "section_title": "1.1 Background",
+      "page_start": 18,
+      "page_end": 18,
+      "text": "Introduction to Python Programming | 1.1 Background\n1.1 Background\nLearning Objectives\nBy the end of this section you should be able to\n• Name two examples of computer programs in everyday life.\n• Explain why Python is a good programming language to learn.\nComputer programs\nA computer is an electronic device that stores and processes information. Examples of computers include\nsmartphones, tablets, laptops, desktops, and servers. Technically, a program is a sequence of instructions that\na computer can run. Programs help people accomplish everyday tasks, create new technology, and have fun.\nThe goal of this book is to teach introductory programming and problem solving. Writing programs is a\ncreative activity, inherently useful, and rewarding! No prior background in computer science is necessary to"
+    },
+    {
+      "n": 2,
+      "chunk_id": "section-800:1668",
+      "book_title": "Introduction to Computer Science",
+      "section_title": "6.4 Memory Management",
+      "page_start": 277,
+      "page_end": 277,
+      "text": "Introduction to Computer Science | 6.4 Memory Management\n6.4 Memory Management\nLearning Objectives\nBy the end of this section, you will be able to:\n• Discuss key concepts related to memory\n• Evaluate dynamic storage management solutions\n• Discuss the differences between virtual and physical memory\nAs you have learned, memory plays a huge role in OSs. Here, we discuss the memory multiplexing, linkers and\ndynamic linking, dynamic storage management, virtual memory, and demand paging.\nMemory\nDifferent processes and threads share the same hardware. It is therefore necessary to multiplex the CPU (i.e.,\ntemporal execution), memory (spatial access), and disks and devices. As discussed earlier, the complete\nworking state of processes and/or kernels is defined by its data (i.e., memory, registers, and disk). For the sake"
+    },
+    {
+      "n": 3,
+      "chunk_id": "section-800:297",
+      "book_title": "Introduction to Python Programming",
+      "section_title": "7.1 Module basics",
+      "page_start": 176,
+      "page_end": 176,
+      "text": "Introduction to Python Programming | 7.1 Module basics\n7.1 Module basics\nLearning objectives\nBy the end of this section you should be able to\n• Write a module that consists only of function definitions.\n• Import the module and use the functions in a program.\nDefining a module\nModules are defined by putting code in a .py file. The area module below is in a file named area.py. This\nmodule provides functions for calculating area.\nEXAMPLE 7.1\nThe area module\n\"\"\"Functions to calculate the area of geometric shapes.\"\"\"\nimport math\n# 2D shapes\ndef square(side):\n    \"\"\"Gets the area of a square.\"\"\"\n    return side**2\ndef rectangle(length, width):\n    \"\"\"Gets the area of a rectangle.\"\"\"\n    return length * width\ndef triangle(base, height):\n    \"\"\"Gets the area of a triangle.\"\"\"\n    return 0.5 * base * height\ndef trapezoid(base1, base2, height):"
+    },
+    {
+      "n": 4,
+      "chunk_id": "section-800:1507",
+      "book_title": "Introduction to Computer Science",
+      "section_title": "5.6 Processor Architectures",
+      "page_start": 236,
+      "page_end": 236,
+      "text": "Introduction to Computer Science | 5.6 Processor Architectures\n5.6 Processor Architectures\nLearning Objectives\nBy the end of this section, you will be able to:\n• Discuss the history and advancements in traditional processor architectures and computation\nmodels\n• Define heterogeneity and discuss its effect on computer systems\nProcessors have a relatively short history that starts in the late 1960s; however, there have been big jumps\nsince then. In this section, we learn about the evolution of processors from the dawn of processor design until\ntoday. The main measures of success of processors involve correctness, speed, power, reliability, and security.\nSpeed has been the main measure of success for some time. But then computer designers began to worry"
+    },
+    {
+      "n": 5,
+      "chunk_id": "section-800:522",
+      "book_title": "Introduction to Python Programming",
+      "section_title": "13.1 Inheritance basics",
+      "page_start": 297,
+      "page_end": 297,
+      "text": "Introduction to Python Programming | 13.1 Inheritance basics\n13.1 Inheritance basics\n13.2 Attribute access\n13.3 Methods\n13.4 Hierarchical inheritance\n13.5 Multiple inheritance and mixin classes\n13.6 Chapter summary\nIntroduction\nReal-world entities are often described in relation to other entities. Ex: A finch is a type of bird. Similarly,\nclasses, which represent types of real-world entities, can be related to each other.\nInheritance describes the relationship in which one class is a type of another class. Classes within inheritance\nrelationships can inherit attributes and methods from other classes without needing to redefine everything.\nThus, inheritance in object-oriented programming reduces redundancy and promotes modularity.\n13.1 Inheritance basics\nLearning objectives\nBy the end of this section you should be able to"
+    }
+  ],
+  "meta": {
+    "model": "claude-opus-5-5",
+    "setup": "section-800__local-bge-small",
+    "latency_ms": 2870
+  }
+}

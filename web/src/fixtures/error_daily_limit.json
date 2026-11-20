@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "daily_limit",
+    "message": "The daily question limit is reached. Try again tomorrow."
+  }
+}
