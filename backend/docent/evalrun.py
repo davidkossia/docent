@@ -182,7 +182,7 @@ def validate_questions(path=QUESTIONS_PATH, sections: list[Section] | None = Non
         if not (isinstance(row["answer"], str) and row["answer"].strip()):
             err("answer must be a non-empty string")
         gold, ev = row["gold_section"], row["evidence"]
-        if gold not in by_id:
+        if not isinstance(gold, str) or gold not in by_id:
             err(f"gold_section {gold!r} is not a section in the corpus")
             continue
         per_section[gold] += 1

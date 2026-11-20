@@ -43,12 +43,14 @@ class LocalIndex:
 
     @staticmethod
     def fingerprint(docs, embedder_name: str) -> str:
-        """SHA-256 of the embedder name and every chunk text, in order."""
+        """SHA-256 of the embedder name and every chunk's text and metadata, in order."""
         h = hashlib.sha256()
         h.update(embedder_name.encode())
         for d in docs:
             h.update(b"\0")
             h.update(d.page_content.encode())
+            h.update(b"\0")
+            h.update(json.dumps(d.metadata, sort_keys=True).encode())
         return h.hexdigest()
 
     @classmethod
