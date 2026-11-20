@@ -23,6 +23,11 @@ def main() -> int:
     sv.add_argument("--fake", nargs="?", const="auto", metavar="FIXTURE",
                     help="answer from web/src/fixtures without calling Claude")
     sv.add_argument("--port", type=int, default=8787)
+    ix = sub.add_parser("index", help="embed chunks and upsert them into Pinecone")
+    ix.add_argument("--strategy", required=True, choices=list(STRATEGIES))
+    ix.add_argument("--embedder", required=True, choices=NAMES)
+    ix.add_argument("--create", action="store_true", help="create the Pinecone index first")
+    ix.add_argument("--dry-run", action="store_true", help="print the plan; no network calls")
     args = p.parse_args()
     if args.cmd == "download":
         download()
@@ -30,6 +35,19 @@ def main() -> int:
         from .evalrun import run_retrieval
 
         run_retrieval(args.strategies, args.embedders)
+    elif args.cmd == "index":
+        from .chunking import build_chunks
+        from .ingest import load_sections
+        from .pinecone_store import DIMENSIONS, INDEX_NAME, index_docs, namespace_for
+
+        docs = build_chunks(STRATEGIES[args.strategy], load_sections())
+        ns = namespace_for(args.strategy, args.embedder)
+        if args.dry_run:
+            print(f"{len(docs)} chunks, {DIMENSIONS[args.embedder]} dimensions, index {INDEX_NAME}, namespace {ns}")
+        else:
+            from .embeddings import get_embedder
+
+            index_docs(docs, get_embedder(args.embedder), args.strategy, args.embedder, args.create)
     elif args.cmd == "serve":
         from .server import serve
 
