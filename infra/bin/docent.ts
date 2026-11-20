@@ -11,7 +11,7 @@ if (!fs.existsSync(path.join(bundle, "docent", "lambda_handler.py"))) {
   throw new Error(`No Lambda bundle in ${bundle}. Run infra/scripts/build_lambda.sh first.`);
 }
 
-// Defaults live in cdk.json; override with -c, for example -c allowedOrigin=https://docent.example.com
+// Defaults live in cdk.json. allowedOrigin has none: pass -c allowedOrigin=https://<the UI's origin>
 new DocentStack(app, "DocentStack", {
   env: { region: app.node.tryGetContext("region") },
   code: Code.fromAsset(bundle),

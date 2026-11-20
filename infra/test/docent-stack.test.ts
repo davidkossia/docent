@@ -71,14 +71,31 @@ test("the quota table is on-demand with a TTL", () => {
   });
 });
 
-test("IAM allows only UpdateItem on the table and GetParameters on the two key parameters", () => {
+test("IAM: no managed policies; logs write on the log group, UpdateItem on the table, GetParameters on the keys", () => {
+  template.resourceCountIs("AWS::IAM::ManagedPolicy", 0);
+  template.resourceCountIs("AWS::IAM::Role", 1);
+  const role = Object.values(template.findResources("AWS::IAM::Role"))[0] as any;
+  expect(role.Properties.ManagedPolicyArns).toBeUndefined();
+  expect(role.Properties.Policies).toBeUndefined();
+  expect(role.Properties.AssumeRolePolicyDocument.Statement).toEqual([
+    { Action: "sts:AssumeRole", Effect: "Allow", Principal: { Service: "lambda.amazonaws.com" } },
+  ]);
+
   const policies = template.findResources("AWS::IAM::Policy");
   const statements = Object.values(policies).flatMap((p: any) => p.Properties.PolicyDocument.Statement);
-  expect(statements).toHaveLength(2);
+  expect(statements).toHaveLength(3);
+  for (const s of statements) expect(s.Effect).toBe("Allow");
+
+  const logs = statements.find((s: any) => JSON.stringify(s.Action).includes("logs:"));
+  expect(logs.Action).toEqual(["logs:CreateLogStream", "logs:PutLogEvents"]);
+  const [logGroupId] = Object.keys(template.findResources("AWS::Logs::LogGroup"));
+  expect(logs.Resource).toEqual({ "Fn::GetAtt": [logGroupId, "Arn"] });
+
   const dynamo = statements.find((s: any) => JSON.stringify(s.Action).includes("dynamodb"));
   expect(dynamo.Action).toBe("dynamodb:UpdateItem");
   const [tableId] = Object.keys(template.findResources("AWS::DynamoDB::Table"));
   expect(dynamo.Resource).toEqual([{ "Fn::GetAtt": [tableId, "Arn"] }]);
+
   const ssm = statements.find((s: any) => JSON.stringify(s.Action).includes("ssm"));
   expect(ssm.Action).toBe("ssm:GetParameters");
   const arns = ssm.Resource.map((r: any) => r["Fn::Join"][1].map((p: any) => (typeof p === "string" ? p : "<partition>")).join(""));
@@ -86,7 +103,19 @@ test("IAM allows only UpdateItem on the table and GetParameters on the two key p
     "arn:<partition>:ssm:us-east-1:123456789012:parameter/docent/anthropic_api_key",
     "arn:<partition>:ssm:us-east-1:123456789012:parameter/docent/pinecone_api_key",
   ]);
-  for (const s of statements) expect(JSON.stringify(s.Resource)).not.toContain('"*"');
+});
+
+test("no IAM resource anywhere is \"*\"", () => {
+  const iam = { ...template.findResources("AWS::IAM::Role"), ...template.findResources("AWS::IAM::Policy"),
+    ...template.findResources("AWS::IAM::ManagedPolicy") };
+  const json = JSON.stringify(iam);
+  expect(json).not.toMatch(/"Resource":"\*"|"Resource":\["\*"/);
+  expect(json).not.toContain('"Action":"*"');
+  expect(json).not.toContain("arn:aws:iam::aws:policy");
+});
+
+test("asynchronous invokes are never retried", () => {
+  template.hasResourceProperties("AWS::Lambda::EventInvokeConfig", { MaximumRetryAttempts: 0 });
 });
 
 test("no secret in the template: no key values, no key variables, no secret resources", () => {
@@ -105,9 +134,21 @@ test("the API URL is an output", () => {
   template.hasOutput("ApiUrl", {});
 });
 
-test.each(["*", "https://docent.example.com/", "docent.example.com", "ftp://docent.example.com"])(
-  "rejects allowedOrigin %s",
-  (allowedOrigin) => expect(() => synth({ allowedOrigin })).toThrow(/allowedOrigin/),
+test.each([
+  "*",
+  "",
+  undefined,
+  "https://docent.example.com/",
+  "docent.example.com",
+  "ftp://docent.example.com",
+  "http://docent.example.com",
+])("rejects allowedOrigin %s", (allowedOrigin) => {
+  expect(() => synth({ allowedOrigin: allowedOrigin as string })).toThrow(/allowedOrigin/);
+});
+
+test.each(["https://docent.example.com", "http://localhost:5173", "http://127.0.0.1:5173"])(
+  "accepts allowedOrigin %s",
+  (allowedOrigin) => expect(() => synth({ allowedOrigin })).not.toThrow(),
 );
 
 test.each([-1, 1.5, NaN])("rejects dailyLimit %s", (dailyLimit) => {

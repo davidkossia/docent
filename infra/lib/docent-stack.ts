@@ -2,7 +2,7 @@ import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from "aws-cdk-l
 import { CorsHttpMethod, HttpApi, HttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { AttributeType, BillingMode, Table } from "aws-cdk-lib/aws-dynamodb";
-import { PolicyStatement } from "aws-cdk-lib/aws-iam";
+import { PolicyStatement, Role, ServicePrincipal } from "aws-cdk-lib/aws-iam";
 import { Architecture, Code, Function, Runtime } from "aws-cdk-lib/aws-lambda";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { Construct } from "constructs";
@@ -54,6 +54,11 @@ export class DocentStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
+    // No managed policies: the role can write to this log group, update the quota table, and read
+    // the two key parameters, and nothing else.
+    const role = new Role(this, "AskRole", { assumedBy: new ServicePrincipal("lambda.amazonaws.com") });
+    logs.grantWrite(role);
+
     // Keys are read from SSM at cold start. Only these three non-secret values go in the environment.
     const fn = new Function(this, "Ask", {
       runtime: Runtime.PYTHON_3_12,
@@ -63,6 +68,8 @@ export class DocentStack extends Stack {
       memorySize: LIMITS.memoryMb,
       timeout: Duration.seconds(LIMITS.timeoutSeconds),
       reservedConcurrentExecutions: LIMITS.reservedConcurrency,
+      retryAttempts: 0, // never re-run a question on an asynchronous invoke
+      role,
       logGroup: logs,
       environment: {
         QUOTA_TABLE: quota.tableName,
@@ -108,15 +115,24 @@ export class DocentStack extends Stack {
   }
 }
 
-function validOrigin(value: string): string {
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+
+function validOrigin(value: string | undefined): string {
+  if (!value) {
+    throw new Error("allowedOrigin is required: pass -c allowedOrigin=https://<the UI's origin>");
+  }
   let url: URL;
   try {
     url = new URL(value);
   } catch {
     throw new Error(`allowedOrigin must be an origin such as https://docent.example.com, not ${value}`);
   }
-  if (!["https:", "http:"].includes(url.protocol) || url.origin !== value) {
+  if (url.origin !== value) {
     throw new Error(`allowedOrigin must be a bare origin (scheme, host, port), not ${value}`);
+  }
+  const local = LOCAL_HOSTS.includes(url.hostname);
+  if (!(url.protocol === "https:" || (url.protocol === "http:" && local))) {
+    throw new Error(`allowedOrigin must use https (http only for localhost), not ${value}`);
   }
   return value;
 }
