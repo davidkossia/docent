@@ -66,18 +66,34 @@ def upsert_metadata(docs: list[Document]) -> tuple[list[str], list[str], list[di
     )
 
 
+def plan_line(docs: list[Document], strategy: str, embedder_name: str) -> str:
+    ns = namespace_for(strategy, embedder_name)
+    return f"{len(docs)} chunks, {DIMENSIONS[embedder_name]} dimensions, index {INDEX_NAME}, namespace {ns}"
+
+
 def index_docs(docs: list[Document], embedder: Embeddings, strategy: str, embedder_name: str,
-               create: bool = False, log=print) -> None:
+               create: bool = False, client=None, store=None, log=print) -> None:
     """Embed `docs` and upsert them. Creates the index only when `create` is true."""
     namespace = namespace_for(strategy, embedder_name)
     if create:
         from pinecone import ServerlessSpec
 
-        _client().create_index(
+        (client or _client()).create_index(
             name=INDEX_NAME, dimension=DIMENSIONS[embedder_name], metric="cosine",
             spec=ServerlessSpec(cloud=CLOUD, region=REGION),
         )
         log(f"created index {INDEX_NAME} ({CLOUD} {REGION}, cosine)")
     ids, texts, metas = upsert_metadata(docs)
-    _store(embedder, namespace).add_texts(texts, metadatas=metas, ids=ids)
+    (store or _store(embedder, namespace)).add_texts(texts, metadatas=metas, ids=ids)
     log(f"upserted {len(ids)} chunks into {INDEX_NAME}/{namespace}")
+
+
+def run_index(docs: list[Document], strategy: str, embedder_name: str, create: bool = False,
+              yes: bool = False, embedder_factory=None, client=None, store=None, log=print) -> None:
+    """Print the plan. Touch the network (embed, create, upsert) only when `yes` is true."""
+    log(plan_line(docs, strategy, embedder_name))
+    if not yes:
+        log("Dry run. Add --yes to upsert" + (" and create the index." if create else "."))
+        return
+    embedder = embedder_factory(embedder_name) if embedder_factory else None
+    index_docs(docs, embedder, strategy, embedder_name, create, client, store, log)

@@ -34,7 +34,8 @@ def main() -> int:
     ix.add_argument("--strategy", required=True, choices=list(STRATEGIES))
     ix.add_argument("--embedder", required=True, choices=NAMES)
     ix.add_argument("--create", action="store_true", help="create the Pinecone index first")
-    ix.add_argument("--dry-run", action="store_true", help="print the plan; no network calls")
+    ix.add_argument("--yes", action="store_true", help="embed and upsert (default: print the plan only)")
+    ix.add_argument("--dry-run", action="store_true", help="print the plan only, even with --yes")
     args = p.parse_args()
     if args.cmd == "download":
         download()
@@ -56,17 +57,12 @@ def main() -> int:
         write_report()
     elif args.cmd == "index":
         from .chunking import build_chunks
+        from .embeddings import get_embedder
         from .ingest import load_sections
-        from .pinecone_store import DIMENSIONS, INDEX_NAME, index_docs, namespace_for
+        from .pinecone_store import run_index
 
         docs = build_chunks(STRATEGIES[args.strategy], load_sections())
-        ns = namespace_for(args.strategy, args.embedder)
-        if args.dry_run:
-            print(f"{len(docs)} chunks, {DIMENSIONS[args.embedder]} dimensions, index {INDEX_NAME}, namespace {ns}")
-        else:
-            from .embeddings import get_embedder
-
-            index_docs(docs, get_embedder(args.embedder), args.strategy, args.embedder, args.create)
+        run_index(docs, args.strategy, args.embedder, args.create, args.yes and not args.dry_run, get_embedder)
     elif args.cmd == "serve":
         from .server import serve
 
