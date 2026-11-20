@@ -49,7 +49,7 @@ Offline ingest runs on a laptop and writes the index (Pinecone or a local file).
 | Service, local server, chat UI | Done; runs locally with `serve --fake`, or with an Anthropic key |
 | Pinecone index command | Done; not run (needs a Pinecone key) |
 | Lambda, CDK stack, spend cap | Done; synthesized, not deployed |
-| Answer eval with Claude | Code in review; not run (needs a key and a $10 cap) |
+| Answer eval with Claude | Code merged; not run (needs a key and a $10 cap) |
 
 ### Retrieval result: no change is significant at 60 test questions
 
