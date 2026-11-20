@@ -53,10 +53,10 @@ You need AWS credentials for the target account, Node.js 22, and `uv`.
    cd infra
    npm ci
    npx cdk deploy -c allowedOrigin=https://<the UI's origin> -c setup=<strategy>__pinecone-e5
-
-   `allowedOrigin` has no default, so `cdk synth` and `cdk deploy` fail without it. It must use
-   `https`; `http` is allowed only for `localhost`, `127.0.0.1`, and `[::1]`.
    ```
+
+   `allowedOrigin` has no default, so `cdk synth`, `cdk deploy` and `cdk destroy` fail without it.
+   It must use `https`; `http` is allowed only for `localhost`, `127.0.0.1`, and `[::1]`.
 
    The stack prints `ApiUrl`. Set the UI's `VITE_API_URL` to it.
 
@@ -77,7 +77,7 @@ Lambda console. Set it to `0` to stop all Claude calls at once.
 To remove everything the stack created, run:
 
 ```bash
-cd infra && npx cdk destroy
+cd infra && npx cdk destroy -c allowedOrigin=https://<the UI's origin>
 ```
 
 `cdk destroy` leaves the two SSM parameters, because you created them. To delete them, run

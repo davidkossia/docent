@@ -12,6 +12,10 @@ UV="$(command -v uv || echo "$HOME/Library/Python/3.9/bin/uv")"
 TARGET=(--target "$OUT" --python-version 3.12 --python-platform aarch64-manylinux_2_28)  # Lambda python3.12 runs Amazon Linux 2023, glibc 2.34
 
 # Ship only committed code: an uncommitted edit in backend/docent would deploy unreviewed.
+if ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "error: build from a git checkout so the committed-code check can run" >&2
+  exit 1
+fi
 if [ -n "$(git -C "$ROOT" status --porcelain -- backend/docent)" ]; then
   echo "error: backend/docent has uncommitted changes; commit or stash them first" >&2
   git -C "$ROOT" status --short -- backend/docent >&2
