@@ -37,15 +37,25 @@ browser (React) --> API Gateway --> Lambda: embed query --> top-k chunks -----+
 
 Offline ingest runs on a laptop and writes the index (Pinecone or a local file). The Lambda only does the query path.
 
-## Status (2026-11-16)
+## Status (2026-11-20)
 
 | Milestone | State |
 |---|---|
 | Plan, README, license | Done |
 | Repo scaffold: `backend/`, `web/`, `infra/`, CI | Done |
-| Ingest and chunking | Done: 1,256 content pages, 203 sections, four chunking strategies |
-| Eval harness | Version 1 written; being replaced by version 2 (see the finding that follows) |
-| API, UI, deploy | Not started |
+| Ingest and chunking | Done: 1,256 content pages, 203 sections, seven chunking strategies |
+| Eval version 2: harness and 144 questions | Done |
+| Retrieval grid on local embedders | Done: 14 setups; results in the README |
+| Service, local server, chat UI | Done; runs locally with `serve --fake`, or with an Anthropic key |
+| Pinecone index command | Done; not run (needs a Pinecone key) |
+| Lambda, CDK stack, spend cap | Done; synthesized, not deployed |
+| Answer eval with Claude | Code in review; not run (needs a key and a $10 cap) |
+
+### Retrieval result: the embedder matters more than the chunking
+
+The selection rule picks `section-800` with `local-bge-small`, the best dev recall@5 (68.3%). On test it reaches 53.3% recall@5 against 51.7% for the `fixed-1000` baseline with the same embedder: 8 questions won, 7 lost. The 95% intervals overlap almost entirely, so no chunking change separates from noise at 60 test questions.
+
+The embedder moves the numbers more. With `fixed-1000` chunking, `local-bge-base` reaches 61.7% test recall@5 against 51.7% for `local-bge-small`, and its best setup (`section-1200`) reaches 65.0%. These numbers come from the test split, so they inform the next step but do not change the selection. The deployed service uses a Pinecone-hosted embedder, measured once a Pinecone key exists.
 
 ### Finding: eval version 1 cannot tell setups apart
 
