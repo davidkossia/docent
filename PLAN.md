@@ -51,11 +51,11 @@ Offline ingest runs on a laptop and writes the index (Pinecone or a local file).
 | Lambda, CDK stack, spend cap | Done; synthesized, not deployed |
 | Answer eval with Claude | Code in review; not run (needs a key and a $10 cap) |
 
-### Retrieval result: the embedder matters more than the chunking
+### Retrieval result: no change is significant at 60 test questions
 
 The selection rule picks `section-800` with `local-bge-small`, the best dev recall@5 (68.3%). On test it reaches 53.3% recall@5 against 51.7% for the `fixed-1000` baseline with the same embedder: 8 questions won, 7 lost. The 95% intervals overlap almost entirely, so no chunking change separates from noise at 60 test questions.
 
-The embedder moves the numbers more. With `fixed-1000` chunking, `local-bge-base` reaches 61.7% test recall@5 against 51.7% for `local-bge-small`, and its best setup (`section-1200`) reaches 65.0%. These numbers come from the test split, so they inform the next step but do not change the selection. The deployed service uses a Pinecone-hosted embedder, measured once a Pinecone key exists.
+The embedder gap is larger than any chunking gap, though its intervals also overlap, so it is a lead and not a result. With `fixed-1000` chunking, `local-bge-base` reaches 61.7% test recall@5 against 51.7% for `local-bge-small`, and its best setup (`section-1200`) reaches 65.0%. These numbers come from the test split, so they inform the next step but do not change the selection. The deployed service uses a Pinecone-hosted embedder, measured once a Pinecone key exists.
 
 ### Finding: eval version 1 cannot tell setups apart
 
