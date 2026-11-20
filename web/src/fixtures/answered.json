@@ -1,0 +1,92 @@
+{
+  "status": "answered",
+  "segments": [
+    {
+      "text": "Python evaluates the operators with the highest precedence first, so multiplication runs before addition and parentheses override both.",
+      "citations": [
+        {
+          "passage": 1,
+          "cited_text": "Operators with the highest precedence execute first."
+        },
+        {
+          "passage": 1,
+          "cited_text": "Ex: 1 + 2 * 3 is 7 because\nmultiplication takes precedence over addition."
+        }
+      ]
+    },
+    {
+      "text": " When operators share a precedence level, associativity sets the order: most are left associative and run from left to right, but exponentiation is right associative.",
+      "citations": [
+        {
+          "passage": 2,
+          "cited_text": "Most operators are left associative and are evaluated\nfrom left to right."
+        },
+        {
+          "passage": 3,
+          "cited_text": "** Exponentiation (right associative)"
+        }
+      ]
+    },
+    {
+      "text": " Parentheses also make an expression easier to read.",
+      "citations": [
+        {
+          "passage": 4,
+          "cited_text": "Parentheses not only assert a different order of\noperations but also reduce confusion."
+        }
+      ]
+    }
+  ],
+  "passages": [
+    {
+      "n": 1,
+      "chunk_id": "section-800:186",
+      "book_title": "Introduction to Python Programming",
+      "section_title": "4.4 Operator precedence",
+      "page_start": 108,
+      "page_end": 108,
+      "text": "Introduction to Python Programming | 4.4 Operator precedence\n4.4 Operator precedence\nLearning objectives\nBy the end of this section you should be able to\n• Describe how precedence impacts order of operations.\n• Describe how associativity impacts order of operations.\n• Explain the purpose of using parentheses in expressions with multiple operators.\nPrecedence\nWhen an expression has multiple operators, which operator is evaluated first? Precedence rules provide the\npriority level of operators. Operators with the highest precedence execute first. Ex: 1 + 2 * 3 is 7 because\nmultiplication takes precedence over addition. However, (1 + 2) * 3 is 9 because parentheses take\nprecedence over multiplication.\nOperator Meaning\n() Parentheses\n** Exponentiation (right associative)\n*, /, //, % Multiplication, division, floor division, modulo"
+    },
+    {
+      "n": 2,
+      "chunk_id": "section-800:188",
+      "book_title": "Introduction to Python Programming",
+      "section_title": "4.4 Operator precedence",
+      "page_start": 109,
+      "page_end": 109,
+      "text": "Introduction to Python Programming | 4.4 Operator precedence\noperations when precedence is the same. Ex: 8 / 4 * 3 is evaluated as (8/4) * 3 rather than 8 / (4*3)\nbecause multiplication and division are left associative. Most operators are left associative and are evaluated\nfrom left to right. Exponentiation is the main exception (noted above) and is right associative: that is, evaluated\nfrom right to left. Ex: 2 ** 3 ** 4 is evaluated as 2 ** (3**4).\nWhen comparison operators are chained, the expression is converted into the equivalent combination of\ncomparisons and evaluated from left to right. Ex. 10 < x <= 20 is evaluated as 10 < x and x <= 20.\nCHECKPOINT\nOperation precedence\nOperation precedence; ch 4, video 10 (https://www.openstax.org/r/operation-precedence)\nCONCEPTS IN PRACTICE\nAssociativity\nHow is each expression evaluated?"
+    },
+    {
+      "n": 3,
+      "chunk_id": "section-800:187",
+      "book_title": "Introduction to Python Programming",
+      "section_title": "4.4 Operator precedence",
+      "page_start": 108,
+      "page_end": 109,
+      "text": "Introduction to Python Programming | 4.4 Operator precedence\n** Exponentiation (right associative)\n*, /, //, % Multiplication, division, floor division, modulo\n+, - Addition, subtraction\n<, <=, >, >=, ==, != Comparison operators\nnot Logical not operator\nand Logical and operator\nor Logical or operator\nTable 4.4 Operator precedence from highest to lowest.\nCHECKPOINT\nOperator precedence\nOperator precedence; ch 4, video 9 (https://www.openstax.org/r/operator-precedence)\nCONCEPTS IN PRACTICE\nPrecedence rules\nWhich part of each expression is evaluated first?\n1 . x ** 2 + 6 / 3\na. 6 / 3\nb. x ** 2\nc. 2 + 6\n2 . not 3 * 5 > 10\na. 3 * 5\nb. not 3\nc. 5 > 10\n3 . z == 5 and x / 8 < 100\na. 5 and x\nb. x / 8\nc. 8 < 100\nAssociativity\nWhat if operators beside each other have the same level of precedence? Associativity determines the order of"
+    },
+    {
+      "n": 4,
+      "chunk_id": "section-800:189",
+      "book_title": "Introduction to Python Programming",
+      "section_title": "4.4 Operator precedence",
+      "page_start": 109,
+      "page_end": 110,
+      "text": "Introduction to Python Programming | 4.4 Operator precedence\nCONCEPTS IN PRACTICE\nAssociativity\nHow is each expression evaluated?\n4 . 10 + 3 * 2 / 4\na. 10 + (3 * (2 / 4))\nb. 10 + ((3 * 2) / 4)\nc. (10 + 3) * (2 / 4)\n5 . 2 * 2 ** 2 ** 3\na. 2 * ((2 ** 2) ** 3)\nb. 2 * (2 ** (2 ** 3))\nc. ((2*2) ** 2) ** 3\n6 . 100 < x > 150\na. 100 < x and x < 150\nb. 100 < x or x > 150\nc. 100 < x and x > 150\nEnforcing order and clarity with parentheses\nOperator precedence rules can be hard to remember. Parentheses not only assert a different order of\noperations but also reduce confusion.\nCHECKPOINT\nUsing parentheses\nUsing parenthesis; ch 4, video 11 (https://www.openstax.org/r/using-parentheses)\nCONCEPTS IN PRACTICE\nUsing parentheses\n7 . Consider the example above. Why was the evaluation order different from what the programmer\nwanted?\na. Equality has precedence over and."
+    },
+    {
+      "n": 5,
+      "chunk_id": "section-800:191",
+      "book_title": "Introduction to Python Programming",
+      "section_title": "4.4 Operator precedence",
+      "page_start": 110,
+      "page_end": 111,
+      "text": "Introduction to Python Programming | 4.4 Operator precedence\n• Avoid spaces immediately inside parentheses.\nAvoid: x = ( 4 * y )\nBetter: x = (4 * y)\n• Surround the following operators with one space: assignment, augment assignment, comparison,\nBoolean.\nAvoid: x= y<44\nBetter: x = y < 44\n• Consider adding whitespace around operators with lower priority.\nAvoid: x = 5 * z+20\nBetter: x = 5*z + 20"
+    }
+  ],
+  "meta": {
+    "model": "claude-opus-5-5",
+    "setup": "section-800__local-bge-small",
+    "latency_ms": 4210
+  }
+}

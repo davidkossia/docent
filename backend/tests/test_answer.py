@@ -1,8 +1,9 @@
 from types import SimpleNamespace as NS
 
+import pytest
 from langchain_core.documents import Document
 
-from docent.answer import NO_ANSWER, answer_question, document_blocks, parse_response
+from docent.answer import NO_ANSWER, UpstreamError, answer_question, document_blocks, parse_response
 from docent.index import Hit
 
 
@@ -31,6 +32,25 @@ def test_parse_maps_citation_to_chunk():
     assert not a.no_answer and not a.safety_refusal
 
 
+def test_one_segment_per_text_block_with_its_own_citations():
+    c1 = NS(document_index=0, cited_text="Multiplication takes precedence.")
+    resp = _resp([
+        NS(type="text", text="Multiplication goes first.", citations=[c1, c1]),
+        NS(type="thinking", thinking="..."),
+        NS(type="text", text=" Parentheses override.", citations=None),
+    ])
+    a = parse_response(resp, _hits())
+    assert [s.text for s in a.segments] == ["Multiplication goes first.", " Parentheses override."]
+    assert len(a.segments[0].citations) == 1  # duplicate dropped
+    assert a.segments[1].citations == []
+    assert a.text == "Multiplication goes first. Parentheses override."
+
+
+def test_max_tokens_is_an_upstream_error():
+    with pytest.raises(UpstreamError):
+        parse_response(_resp([NS(type="text", text="cut", citations=None)], stop="max_tokens"), _hits())
+
+
 def test_no_answer_and_safety_refusal_are_flagged():
     a = parse_response(_resp([NS(type="text", text=NO_ANSWER, citations=None)]), _hits())
     assert a.no_answer and not a.citations
@@ -50,6 +70,8 @@ def test_request_turns_on_fallbacks_and_citations():
 
     answer_question(Client, "q?", _hits())
     assert seen["model"] == "claude-opus-5-5"
+    assert seen["max_tokens"] == 16000
+    assert seen["output_config"] == {"effort": "low"}
     assert seen["fallbacks"] == "default"
     assert seen["betas"] == ["server-side-fallback-2026-07-01"]
     assert seen["messages"][0]["content"][0]["type"] == "document"
