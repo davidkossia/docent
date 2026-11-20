@@ -7,7 +7,7 @@ Docent is a 2026 rebuild of CourseVector, an earlier project of mine whose repos
 ## What it does
 
 - Loads two OpenStax textbooks (1,256 content pages), splits them into chunks, embeds the chunks, and indexes them.
-- Retrieves the top passages for a question with LangChain.
+- Retrieves the top passages for a question. LangChain supplies the text splitters and the Pinecone store.
 - Asks Claude to answer from those passages only. The passages go in as `document` blocks with citations enabled, so each claim links to its source passage.
 - Refuses when the passages do not answer the question.
 - Serves the answer through `POST /ask` ([contract](docs/api.md)) to a React chat UI. Citation chips open the source passage.
@@ -83,7 +83,7 @@ docs/      API contract
 
 You need Python 3.12 with [uv](https://docs.astral.sh/uv/), and Node 22. Run each block from the repository root.
 
-Set up the backend and download the corpus (two PDFs, about 1,000 pages, saved to `backend/data/raw`):
+Set up the backend and download the corpus (two PDFs, 1,336 pages, saved to `backend/data/raw`):
 
 ```bash
 cd backend
@@ -120,7 +120,7 @@ npm ci
 npm run dev
 ```
 
-To answer with Claude instead, copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`. Build the default local index once (`section-800` with `local-bge-small`), then drop `--fake`. Each question costs about $0.02.
+To answer with Claude instead, copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`. Build the default local index once (`section-800` with `local-bge-small`), then drop `--fake`. Each question costs about $0.03.
 
 ```bash
 cd backend

@@ -127,7 +127,7 @@ Embedders: `local-bge-small` and `local-bge-base` (no key), then a hosted model 
 | Pinecone-hosted embeddings | $0 expected | about 1M tokens per setup; the free allowance is checked before use |
 | OpenAI embeddings (optional) | under $0.05 per full corpus | about 1M tokens at $0.02 per 1M |
 | Pinecone serverless | $0 on the Starter plan | one index, under the free storage limit |
-| Claude per question | about $0.02 | Opus 5.5 at $4 / $20 per 1M tokens, 5 passages, low effort |
+| Claude per question | about $0.03 | Opus 5.5 at $4 / $20 per 1M tokens, 5 passages, low effort |
 | Claude answer eval | about $7 to $8, hard cap $10 | 216 answer calls and about 180 judge calls on the test split |
 | Lambda + API Gateway | $0 at demo volume | inside the free tier |
 
