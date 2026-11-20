@@ -30,6 +30,12 @@ def main() -> int:
     sv.add_argument("--fake", nargs="?", const="auto", choices=["auto", *FIXTURE_NAMES], metavar="FIXTURE",
                     help="answer from web/src/fixtures without calling Claude")
     sv.add_argument("--port", type=int, default=8787)
+    ix = sub.add_parser("index", help="embed chunks and upsert them into Pinecone")
+    ix.add_argument("--strategy", required=True, choices=list(STRATEGIES))
+    ix.add_argument("--embedder", required=True, choices=NAMES)
+    ix.add_argument("--create", action="store_true", help="create the Pinecone index first")
+    ix.add_argument("--yes", action="store_true", help="embed and upsert (default: print the plan only)")
+    ix.add_argument("--dry-run", action="store_true", help="print the plan only, even with --yes")
     args = p.parse_args()
     if args.cmd == "download":
         download()
@@ -49,6 +55,14 @@ def main() -> int:
         from .evalrun import write_report
 
         write_report()
+    elif args.cmd == "index":
+        from .chunking import build_chunks
+        from .embeddings import get_embedder
+        from .ingest import load_sections
+        from .pinecone_store import run_index
+
+        docs = build_chunks(STRATEGIES[args.strategy], load_sections())
+        run_index(docs, args.strategy, args.embedder, args.create, args.yes and not args.dry_run, get_embedder)
     elif args.cmd == "serve":
         from .server import serve
 
