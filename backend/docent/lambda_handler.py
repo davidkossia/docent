@@ -178,6 +178,10 @@ def _remaining_s(context) -> float:
 def _answer(event, context, deps: Deps | None, record: dict) -> dict:
     global _deps
     question = validate_question(_parse_question(event))
+    try:
+        question.encode("utf-8")  # JSON allows lone surrogates ("\ud800"); the model request does not
+    except UnicodeEncodeError:
+        raise _bad_body() from None
     deps = deps or _cached_deps()
     if not quota.check_and_count(deps.table, quota.utc_day(), quota.daily_limit()):
         raise ServiceError(429, "daily_limit", "The daily question limit is reached. Try again tomorrow.")

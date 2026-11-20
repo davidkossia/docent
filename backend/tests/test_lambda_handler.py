@@ -152,8 +152,11 @@ def test_over_the_daily_limit_returns_429_and_never_calls_the_model():
     _event(raw=json.dumps({"question": QUESTION, "pad": "y" * lh.MAX_BODY_BYTES})),
     _event(raw="[" * 3000 + "]" * 3000),
     "not an event",
+    _event(raw='{"question": "What is \\ud800 in Python?"}'),
+    _event(raw='{"question": "What is \\ud800 in Python?"}', b64=True),
 ], ids=["bad-json", "empty-body", "missing-body", "bad-base64", "not-object", "not-string",
-        "no-question", "blank", "501-chars", "oversized-body", "deep-nesting", "not-a-dict"])
+        "no-question", "blank", "501-chars", "oversized-body", "deep-nesting", "not-a-dict",
+        "lone-surrogate", "lone-surrogate-base64"])
 def test_invalid_requests_return_400_before_the_quota(event):
     deps = _deps()
     status, body = _call(event, deps)
