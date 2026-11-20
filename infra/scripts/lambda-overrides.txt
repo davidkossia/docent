@@ -1,0 +1,3 @@
+# uv overrides for the Lambda bundle. A marker that never matches removes the package:
+# langchain-pinecone requires langchain-openai, but nothing on the query path imports it.
+langchain-openai; sys_platform == "never"
